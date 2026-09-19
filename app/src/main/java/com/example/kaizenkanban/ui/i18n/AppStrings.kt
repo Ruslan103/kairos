@@ -357,8 +357,8 @@ class AppStrings(private val appLanguage: AppLanguage) {
     val onboardingDone get() = t("Got it", "Понятно")
     val onboardingTitle1 get() = t("Boards & hubs", "Доски и хабы")
     val onboardingText1 get() = t(
-        "Double-tap the board name to open all projects. Star a primary hub in More. Hubs swipe as a carousel.",
-        "Двойной тап по названию доски открывает все проекты. Основной хаб — в Ещё (★). Хабы листаются как карусель."
+        "Double-tap the board name to open all projects. Pull the hub title down for menus, up to hide them. Star a primary hub in More. Hubs swipe as a carousel.",
+        "Двойной тап по названию доски — все проекты. Тяни заголовок хаба вниз — меню и списки, вверх — скрыть. Основной хаб — в Ещё (★). Хабы — карусель."
     )
     val onboardingTitle2 get() = t("Due dates & reminders", "Сроки и напоминания")
     val onboardingText2 get() = t(

@@ -621,6 +621,34 @@ fun BoardScreen(
     }
     var lastBoardOpenedForPrimary by remember { mutableStateOf<String?>(null) }
 
+    val hubCount = columns.size
+    // Loop when there is at least one hub: order is hubs… then «new hub» as last page.
+    // Pager: [cloneAdd][hubs…][addHub][cloneFirst] — swipe either way wraps through add page.
+    val hubLoop = hubCount >= 1
+    val hubPagerCount = if (hubLoop) hubCount + 3 else hubCount + 1
+    val addHubVirtual = if (hubLoop) hubCount + 1 else hubCount
+    val cloneAddVirtual = 0
+    val cloneFirstVirtual = hubCount + 2
+
+    fun realToVirtual(real: Int): Int =
+        if (hubLoop) real.coerceIn(0, (hubCount - 1).coerceAtLeast(0)) + 1
+        else real.coerceIn(0, (hubCount - 1).coerceAtLeast(0))
+
+    fun isAddHubVirtual(virtual: Int): Boolean =
+        if (hubLoop) virtual == cloneAddVirtual || virtual == addHubVirtual
+        else virtual == hubCount
+
+    fun virtualToReal(virtual: Int): Int {
+        if (hubCount <= 0) return 0
+        if (!hubLoop) return virtual.coerceIn(0, hubCount - 1)
+        return when {
+            // clone of add / real add: chips keep last hub highlighted
+            virtual <= 0 || virtual == addHubVirtual -> hubCount - 1
+            virtual in 1..hubCount -> virtual - 1
+            else -> 0 // clone of first
+        }
+    }
+
     fun primaryHubIndex(): Int {
         if (columns.isEmpty()) return 0
         val preferred = primaryHubId
@@ -657,14 +685,14 @@ fun BoardScreen(
             if (currentColumnIndex !in columns.indices) {
                 val index = primaryHubIndex()
                 currentColumnIndex = index
-                lazyListState.scrollToItem(index)
+                lazyListState.scrollToItem(realToVirtual(index))
             }
             return@LaunchedEffect
         }
         lastBoardOpenedForPrimary = currentBoardId
         val index = primaryHubIndex()
         currentColumnIndex = index
-        lazyListState.scrollToItem(index)
+        lazyListState.scrollToItem(realToVirtual(index))
     }
 
     LaunchedEffect(currentBoardId, pendingHubColumnId, columns) {
@@ -672,7 +700,7 @@ fun BoardScreen(
         val index = columns.indexOfFirst { it.id == hubId }
         if (index >= 0) {
             lastBoardOpenedForPrimary = currentBoardId
-            lazyListState.animateScrollToItem(index)
+            lazyListState.animateScrollToItem(realToVirtual(index))
             currentColumnIndex = index
             pendingHubColumnId = null
             return@LaunchedEffect
@@ -685,47 +713,38 @@ fun BoardScreen(
 
     // Prefer the hub closest to viewport center; update selection only after scroll settles
     // to avoid tab/chip jitter while snap fling is still moving.
-    fun hubIndexNearCenter(): Int {
+    fun hubVirtualNearCenter(): Int {
         val layout = lazyListState.layoutInfo
         val visible = layout.visibleItemsInfo
+        val maxIndex = (hubPagerCount - 1).coerceAtLeast(0)
         if (visible.isEmpty()) {
-            return lazyListState.firstVisibleItemIndex
-                .coerceIn(0, (columns.size - 1).coerceAtLeast(0))
+            return lazyListState.firstVisibleItemIndex.coerceIn(0, maxIndex)
         }
         val viewportCenter = (layout.viewportStartOffset + layout.viewportEndOffset) / 2
         return visible.minByOrNull { info ->
             kotlin.math.abs((info.offset + info.size / 2) - viewportCenter)
-        }?.index?.coerceIn(0, (columns.size - 1).coerceAtLeast(0))
-            ?: lazyListState.firstVisibleItemIndex.coerceIn(0, (columns.size - 1).coerceAtLeast(0))
+        }?.index?.coerceIn(0, maxIndex)
+            ?: lazyListState.firstVisibleItemIndex.coerceIn(0, maxIndex)
     }
 
-    val currentColumnIndexState = rememberUpdatedState(currentColumnIndex)
-    val columnsSizeState = rememberUpdatedState(columns.size)
-
-    LaunchedEffect(lazyListState, columns.size) {
-        snapshotFlow { lazyListState.isScrollInProgress }
-            .distinctUntilChanged()
-            .collect { scrolling ->
-                if (!scrolling) {
-                    // Let snap fling finish before updating selection (avoids chip/layout jitter).
-                    delay(48)
-                    if (!lazyListState.isScrollInProgress) {
-                        currentColumnIndex = hubIndexNearCenter()
-                    }
-                }
+    suspend fun remapHubPagerClones() {
+        if (!hubLoop) return
+        when (hubVirtualNearCenter()) {
+            cloneAddVirtual -> {
+                // Clone of «new hub» → real add page (last in carousel).
+                lazyListState.scrollToItem(addHubVirtual)
             }
-    }
-
-    LaunchedEffect(currentColumnIndex, columns.size) {
-        if (columns.isNotEmpty() && !lazyListState.isScrollInProgress) {
-            // Instant tab align — animated tab scroll competed with hub snap.
-            tabRowState.scrollToItem((currentColumnIndex - 1).coerceAtLeast(0))
+            cloneFirstVirtual -> {
+                // Clone of first hub → real first.
+                lazyListState.scrollToItem(1)
+                currentColumnIndex = 0
+            }
+            else -> Unit
         }
     }
 
     // Drag state — position floats stay out of composition so DnD doesn't rebuild the whole board
     var draggedTask by remember { mutableStateOf<Task?>(null) }
-    val dragActiveState = rememberUpdatedState(draggedTask != null)
     val dragPosX = remember { mutableFloatStateOf(0f) }
     val dragPosY = remember { mutableFloatStateOf(0f) }
     val columnBounds = remember { mutableMapOf<String, androidx.compose.ui.geometry.Rect>() }
@@ -739,6 +758,46 @@ fun BoardScreen(
     var lastDropPreview by remember { mutableStateOf<TaskDropPreview?>(null) }
     var dropPreview by remember { mutableStateOf<TaskDropPreview?>(null) }
     var hoveredOtherBoardId by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(lazyListState, hubPagerCount) {
+        snapshotFlow {
+            Triple(
+                lazyListState.isScrollInProgress,
+                draggedTask != null,
+                lazyListState.firstVisibleItemIndex to lazyListState.firstVisibleItemScrollOffset
+            )
+        }
+            .distinctUntilChanged()
+            .collect { (scrolling, dragging, _) ->
+                if (dragging || scrolling) return@collect
+                if (!hubLoop) {
+                    val virtual = hubVirtualNearCenter()
+                    if (!isAddHubVirtual(virtual)) {
+                        val real = virtualToReal(virtual)
+                        if (real != currentColumnIndex) currentColumnIndex = real
+                    }
+                    return@collect
+                }
+                when (val virtual = hubVirtualNearCenter()) {
+                    cloneAddVirtual -> remapHubPagerClones()
+                    cloneFirstVirtual -> remapHubPagerClones()
+                    in 1..hubCount -> {
+                        val real = virtual - 1
+                        if (real != currentColumnIndex) currentColumnIndex = real
+                    }
+                    // addHubVirtual: leave chip selection as-is
+                }
+            }
+    }
+
+    LaunchedEffect(currentColumnIndex, columns.size) {
+        if (columns.isNotEmpty() && !lazyListState.isScrollInProgress) {
+            val tabTarget = (currentColumnIndex - 1).coerceAtLeast(0)
+            if (tabRowState.firstVisibleItemIndex != tabTarget) {
+                tabRowState.scrollToItem(tabTarget)
+            }
+        }
+    }
 
     fun currentDragPosition(): Offset = Offset(dragPosX.floatValue, dragPosY.floatValue)
 
@@ -802,6 +861,17 @@ fun BoardScreen(
             val originX = contentOriginX.floatValue
             val widthPx = contentWidthPx.floatValue.takeIf { it > 0f } ?: screenWidthPx
             val localX = pos.x - originX
+            val virtualNow = hubVirtualNearCenter()
+            // Remap edge clones only; keep «new hub» as a normal last page (no drop target).
+            if (hubLoop) {
+                when (virtualNow) {
+                    cloneAddVirtual -> lazyListState.scrollToItem(addHubVirtual)
+                    cloneFirstVirtual -> {
+                        lazyListState.scrollToItem(1)
+                        currentColumnIndex = 0
+                    }
+                }
+            }
             val scrollingHoriz = when {
                 localX > widthPx - edgeH && lazyListState.canScrollForward -> {
                     val ratio = ((localX - (widthPx - edgeH)) / edgeH).coerceIn(0.2f, 1f)
@@ -862,7 +932,14 @@ fun BoardScreen(
     }
 
     fun finishTaskDrag() {
+        // Clear first so root Final-pass + card onDragEnd cannot double-commit the drop.
         val dragged = draggedTask ?: return
+        draggedTask = null
+        val previewSnapshot = lastDropPreview
+        dropPreview = null
+        hoveredOtherBoardId = null
+        lastDropPreview = null
+
         val dragPos = currentDragPosition()
         val targetOtherBoardId = otherBoardBounds.entries.find { it.value.contains(dragPos) }?.key
         if (targetOtherBoardId != null) {
@@ -871,11 +948,12 @@ fun BoardScreen(
                 ?: dragged.columnId
             pendingExpandBoardId = targetOtherBoardId
         } else {
-            val preview = lastDropPreview
-            val resolved = if (preview != null && columnBounds[preview.columnId]?.contains(dragPos) == true) {
-                preview.columnId to preview.insertIndex
+            val resolved = if (previewSnapshot != null &&
+                columnBounds[previewSnapshot.columnId]?.contains(dragPos) == true
+            ) {
+                previewSnapshot.columnId to previewSnapshot.insertIndex
             } else {
-                resolveColumnDrop(dragPos, dragged, lastDropPreview, dropSlotHeightPx)
+                resolveColumnDrop(dragPos, dragged, previewSnapshot, dropSlotHeightPx)
             }
             if (resolved != null) {
                 val (dropTargetColumn, visualPosition) = resolved
@@ -967,28 +1045,30 @@ fun BoardScreen(
 
                 if (dropIndex >= 0) {
                     coroutineScope.launch {
-                        lazyListState.animateScrollToItem(dropIndex)
+                        lazyListState.animateScrollToItem(realToVirtual(dropIndex))
                     }
                 }
             }
         }
-        draggedTask = null
-        dropPreview = null
-        hoveredOtherBoardId = null
-        lastDropPreview = null
     }
 
     fun focusedHubIndex(): Int {
         val visible = lazyListState.layoutInfo.visibleItemsInfo
-        if (visible.isEmpty()) {
+        val maxVirtual = (hubPagerCount - 1).coerceAtLeast(0)
+        val virtual = if (visible.isEmpty()) {
+            lazyListState.firstVisibleItemIndex.coerceIn(0, maxVirtual)
+        } else {
+            val viewportCenter =
+                (lazyListState.layoutInfo.viewportStartOffset + lazyListState.layoutInfo.viewportEndOffset) / 2
+            visible.minByOrNull { info ->
+                kotlin.math.abs((info.offset + info.size / 2) - viewportCenter)
+            }?.index?.coerceIn(0, maxVirtual)
+                ?: lazyListState.firstVisibleItemIndex.coerceIn(0, maxVirtual)
+        }
+        if (isAddHubVirtual(virtual)) {
             return currentColumnIndex.coerceIn(0, (columns.size - 1).coerceAtLeast(0))
         }
-        val viewportCenter =
-            (lazyListState.layoutInfo.viewportStartOffset + lazyListState.layoutInfo.viewportEndOffset) / 2
-        return visible.minByOrNull { info ->
-            kotlin.math.abs((info.offset + info.size / 2) - viewportCenter)
-        }?.index?.coerceIn(0, (columns.size - 1).coerceAtLeast(0))
-            ?: currentColumnIndex.coerceIn(0, (columns.size - 1).coerceAtLeast(0))
+        return virtualToReal(virtual)
     }
 
     fun sortCurrentHubByImportance() {
@@ -1071,7 +1151,7 @@ fun BoardScreen(
         )
         if (targetIndex >= 0) {
             coroutineScope.launch {
-                lazyListState.animateScrollToItem(targetIndex)
+                lazyListState.animateScrollToItem(realToVirtual(targetIndex))
             }
         }
         keyboardController?.hide()
@@ -1086,7 +1166,7 @@ fun BoardScreen(
             tasksInHub(col, index).any { !it.isCompleted }
         }
         if (matchIndex >= 0) {
-            lazyListState.animateScrollToItem(matchIndex)
+            lazyListState.animateScrollToItem(realToVirtual(matchIndex))
         }
     }
 
@@ -1126,8 +1206,8 @@ fun BoardScreen(
         topBar = {
                 AnimatedVisibility(
                     visible = showTopBar,
-                    enter = expandVertically(animationSpec = tween(120)) + fadeIn(animationSpec = tween(100)),
-                    exit = shrinkVertically(animationSpec = tween(90)) + fadeOut(animationSpec = tween(70))
+                    enter = expandVertically(animationSpec = tween(80)) + fadeIn(animationSpec = tween(70)),
+                    exit = shrinkVertically(animationSpec = tween(70)) + fadeOut(animationSpec = tween(60))
                 ) {
                     Column(modifier = Modifier.fillMaxWidth()) {
                     TopAppBar(
@@ -1451,14 +1531,20 @@ fun BoardScreen(
                             .background(newProjectGradient)
                             .clickable {
                                 val visible = lazyListState.layoutInfo.visibleItemsInfo
-                                val targetIndex = if (visible.isEmpty()) {
-                                    currentColumnIndex
+                                val maxVirtual = (hubPagerCount - 1).coerceAtLeast(0)
+                                val virtual = if (visible.isEmpty()) {
+                                    realToVirtual(currentColumnIndex)
                                 } else {
                                     val viewportCenter =
                                         (lazyListState.layoutInfo.viewportStartOffset + lazyListState.layoutInfo.viewportEndOffset) / 2
                                     visible.minByOrNull { item ->
                                         kotlin.math.abs((item.offset + item.size / 2) - viewportCenter)
-                                    }?.index ?: currentColumnIndex
+                                    }?.index ?: realToVirtual(currentColumnIndex)
+                                }.coerceIn(0, maxVirtual)
+                                val targetIndex = if (isAddHubVirtual(virtual)) {
+                                    currentColumnIndex
+                                } else {
+                                    virtualToReal(virtual)
                                 }.coerceIn(0, (columns.size - 1).coerceAtLeast(0))
                                 val targetColId = columns.getOrNull(targetIndex)?.id ?: columns.firstOrNull()?.id
                                 isAddingTaskToColumn = targetColId
@@ -1478,7 +1564,7 @@ fun BoardScreen(
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
         containerColor = MaterialTheme.colorScheme.background,
-        contentWindowInsets = if (showTopBar) WindowInsets.safeDrawing else WindowInsets.statusBars
+        contentWindowInsets = WindowInsets.safeDrawing
     ) { padding ->
         Box(
             modifier = Modifier
@@ -1523,8 +1609,8 @@ fun BoardScreen(
 
                 AnimatedVisibility(
                     visible = showBoardsList && currentProjectBoards.isNotEmpty(),
-                    enter = expandVertically(animationSpec = tween(120)) + fadeIn(animationSpec = tween(100)),
-                    exit = shrinkVertically(animationSpec = tween(90)) + fadeOut(animationSpec = tween(70))
+                    enter = expandVertically(animationSpec = tween(80)) + fadeIn(animationSpec = tween(70)),
+                    exit = shrinkVertically(animationSpec = tween(70)) + fadeOut(animationSpec = tween(60))
                 ) {
                     LazyRow(
                         modifier = Modifier
@@ -1649,8 +1735,8 @@ fun BoardScreen(
                 // Collapsible Column Switcher bar (chips toggled by "Хабы" in TopAppBar)
                 AnimatedVisibility(
                     visible = showColumnHeaders && columns.isNotEmpty(),
-                    enter = expandVertically(animationSpec = tween(120)) + fadeIn(animationSpec = tween(100)),
-                    exit = shrinkVertically(animationSpec = tween(90)) + fadeOut(animationSpec = tween(70))
+                    enter = expandVertically(animationSpec = tween(80)) + fadeIn(animationSpec = tween(70)),
+                    exit = shrinkVertically(animationSpec = tween(70)) + fadeOut(animationSpec = tween(60))
                 ) {
                     LazyRow(
                         state = tabRowState,
@@ -1668,7 +1754,7 @@ fun BoardScreen(
                                 Surface(
                                     onClick = {
                                         coroutineScope.launch {
-                                            lazyListState.animateScrollToItem(index)
+                                            lazyListState.animateScrollToItem(realToVirtual(index))
                                         }
                                     },
                                     shape = RoundedCornerShape(20.dp),
@@ -1738,58 +1824,67 @@ fun BoardScreen(
                     state = lazyListState,
                     flingBehavior = if (draggedTask != null) ScrollableDefaults.flingBehavior() else flingBehavior,
                     userScrollEnabled = draggedTask == null,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .pointerInput(currentColumnIndex, columns.size) {
-                            // Only intercept at first/last hub — keeps middle swipes snappy.
-                            val count = columnsSizeState.value
-                            if (count < 2) return@pointerInput
-                            val edgeIndex = currentColumnIndexState.value.coerceIn(0, count - 1)
-                            if (edgeIndex != 0 && edgeIndex != count - 1) return@pointerInput
-                            val pullThreshold = 64f
-                            val maxListMove = 48f
-                            awaitEachGesture {
-                                awaitFirstDown(requireUnconsumed = false)
-                                if (dragActiveState.value) return@awaitEachGesture
-                                val startIndex = currentColumnIndexState.value.coerceIn(0, count - 1)
-                                if (startIndex != 0 && startIndex != count - 1) return@awaitEachGesture
-                                val startFirst = lazyListState.firstVisibleItemIndex
-                                val startOffset = lazyListState.firstVisibleItemScrollOffset
-                                var totalDx = 0f
-                                while (true) {
-                                    val event = awaitPointerEvent(PointerEventPass.Final)
-                                    event.changes.forEach { change ->
-                                        if (change.pressed) {
-                                            totalDx += change.positionChange().x
-                                        }
-                                    }
-                                    if (event.changes.none { it.pressed }) break
-                                }
-                                if (dragActiveState.value) return@awaitEachGesture
-                                val listMoved = abs(lazyListState.firstVisibleItemScrollOffset - startOffset) +
-                                    abs(lazyListState.firstVisibleItemIndex - startFirst) * 1000
-                                val stayedOnHub = listMoved < maxListMove &&
-                                    lazyListState.firstVisibleItemIndex == startFirst
-                                val target = when {
-                                    startIndex == 0 && stayedOnHub && totalDx > pullThreshold ->
-                                        count - 1
-                                    startIndex == count - 1 && stayedOnHub && totalDx < -pullThreshold ->
-                                        0
-                                    else -> return@awaitEachGesture
-                                }
-                                coroutineScope.launch {
-                                    lazyListState.animateScrollToItem(target)
-                                    currentColumnIndex = target
-                                }
-                            }
-                        },
+                    modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(
-                        top = if (showTopBar) 16.dp else 4.dp,
+                        top = 8.dp,
                         bottom = 16.dp
                     ),
                     horizontalArrangement = Arrangement.spacedBy(0.dp)
                 ) {
-                    itemsIndexed(columns, key = { _, col -> col.id }) { index, column ->
+                    items(
+                        count = hubPagerCount,
+                        key = { virtual ->
+                            when {
+                                hubLoop && virtual == cloneAddVirtual -> "wrap-add-hub"
+                                hubLoop && virtual == cloneFirstVirtual -> "wrap-head-${columns.first().id}"
+                                virtual == addHubVirtual || (!hubLoop && virtual == hubCount) -> "add-hub-page"
+                                else -> columns[virtualToReal(virtual)].id
+                            }
+                        }
+                    ) { virtual ->
+                        if (isAddHubVirtual(virtual)) {
+                            Box(
+                                modifier = Modifier.fillParentMaxWidth(),
+                                contentAlignment = Alignment.TopCenter
+                            ) {
+                                OutlinedButton(
+                                    onClick = { isAddingColumn = true },
+                                    modifier = Modifier
+                                        .width(columnWidth)
+                                        .padding(top = 12.dp)
+                                        .height(64.dp),
+                                    shape = RoundedCornerShape(10.dp),
+                                    border = androidx.compose.foundation.BorderStroke(
+                                        1.5.dp,
+                                        MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)
+                                    ),
+                                    colors = ButtonDefaults.outlinedButtonColors(
+                                        contentColor = MaterialTheme.colorScheme.primary
+                                    )
+                                ) {
+                                    Icon(
+                                        Icons.Default.Add,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(28.dp),
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        s.newHub,
+                                        fontWeight = FontWeight.Bold,
+                                        style = MaterialTheme.typography.titleLarge,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                            return@items
+                        }
+
+                        val isWrapClone = hubLoop && virtual == cloneFirstVirtual
+                        val index = virtualToReal(virtual)
+                        val column = columns[index]
                         val columnTasks = tasksInHub(column, index)
                         val prevColumn = when {
                             columns.size < 2 -> null
@@ -1851,15 +1946,16 @@ fun BoardScreen(
 
                                 if (targetIndex >= 0) {
                                     coroutineScope.launch {
-                                        lazyListState.animateScrollToItem(targetIndex)
+                                        lazyListState.animateScrollToItem(realToVirtual(targetIndex))
                                     }
                                 }
                             },
                             onColumnPositioned = { rect ->
-                                columnBounds[column.id] = rect
+                                // Clones share column.id with real hubs — never overwrite DnD hit boxes.
+                                if (!isWrapClone) columnBounds[column.id] = rect
                             },
                             onTaskPositioned = { task, rect ->
-                                taskBounds[task.id] = rect
+                                if (!isWrapClone) taskBounds[task.id] = rect
                             },
                             onDragStart = { task, offset ->
                                 draggedTask = task
@@ -1905,6 +2001,11 @@ fun BoardScreen(
                                 showBoardsList = false
                                 showColumnHeaders = false
                             },
+                            onHideTopBar = {
+                                showTopBar = false
+                                showBoardsList = false
+                                showColumnHeaders = false
+                            },
                             onCommentColumnClick = { columnForComments = column },
                             columnCommentsCount = columnCommentCountById[column.id] ?: 0,
                             commentCountByTaskId = commentCountByTaskId,
@@ -1929,44 +2030,18 @@ fun BoardScreen(
                             },
                             draggedTaskId = draggedTask?.id,
                             isCompactMode = isExecutionMode,
-                            isDropTarget = dropPreview?.columnId == column.id,
-                            dropInsertIndex = dropPreview?.takeIf { it.columnId == column.id }?.insertIndex,
-                            onHubScrollState = { hubScrollStates[column.id] = it },
+                            isDropTarget = !isWrapClone && dropPreview?.columnId == column.id,
+                            dropInsertIndex = if (isWrapClone) null
+                            else dropPreview?.takeIf { it.columnId == column.id }?.insertIndex,
+                            onHubScrollState = {
+                                if (!isWrapClone) hubScrollStates[column.id] = it
+                            },
                             onHubListPositioned = { rect ->
-                                hubListBounds[column.id] = rect
+                                if (!isWrapClone) hubListBounds[column.id] = rect
                             },
                             onToggleCompleted = { completeTaskWithUndo(it) },
                             viewModel = viewModel
                         )
-                        }
-                    }
-                    
-                    item {
-                        Box(
-                            modifier = Modifier.fillParentMaxWidth(),
-                            contentAlignment = Alignment.TopCenter
-                        ) {
-                        OutlinedButton(
-                            onClick = { isAddingColumn = true },
-                            modifier = Modifier
-                                .width(columnWidth)
-                                .padding(top = 12.dp)
-                                .height(64.dp),
-                            shape = RoundedCornerShape(10.dp),
-                            border = androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary)
-                        ) {
-                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(28.dp), tint = MaterialTheme.colorScheme.primary)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                s.newHub,
-                                fontWeight = FontWeight.Bold,
-                                style = MaterialTheme.typography.titleLarge,
-                                color = MaterialTheme.colorScheme.primary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
                         }
                     }
                 }
@@ -1979,7 +2054,7 @@ fun BoardScreen(
                         onClick = {
                             if (targetBoardId == currentBoardId && scrollIndex != null) {
                                 coroutineScope.launch {
-                                    lazyListState.animateScrollToItem(scrollIndex)
+                                    lazyListState.animateScrollToItem(realToVirtual(scrollIndex))
                                 }
                             } else {
                                 openBoardAtHub(targetBoardId, targetColumnId)
@@ -2741,7 +2816,7 @@ fun BoardScreen(
             if (exclusiveDialog == "move") {
                 val sourceHubId = taskForMoveHubId
                     ?: columns.find { taskAppearsOnColumn(taskForMove!!, it, state.columns, state.boards) }?.id
-                    ?: columns.getOrNull(lazyListState.firstVisibleItemIndex)?.id.orEmpty()
+                    ?: columns.getOrNull(virtualToReal(lazyListState.firstVisibleItemIndex))?.id.orEmpty()
                 fun dismissMoveDialog() {
                     taskForMove = null
                     taskForMoveHubId = null
@@ -2770,7 +2845,7 @@ fun BoardScreen(
                         )
                         if (targetIndex >= 0) {
                             coroutineScope.launch {
-                                lazyListState.animateScrollToItem(targetIndex)
+                                lazyListState.animateScrollToItem(realToVirtual(targetIndex))
                             }
                             Toast.makeText(context, s.taskMovedToHub(s.localized(targetCol?.title.orEmpty())), Toast.LENGTH_SHORT).show()
                         } else {
@@ -2823,7 +2898,7 @@ fun BoardScreen(
                         viewModel.moveColumn(colId, direction, currentBoardId)
                         if (newIdx in columns.indices) {
                             coroutineScope.launch {
-                                lazyListState.animateScrollToItem(newIdx)
+                                lazyListState.animateScrollToItem(realToVirtual(newIdx))
                             }
                         }
                     },
@@ -3149,6 +3224,7 @@ fun ColumnItem(
     onRevealBoardsList: () -> Unit = {},
     onCollapseOneLevel: () -> Unit = {},
     onCollapseAllLists: () -> Unit = {},
+    onHideTopBar: () -> Unit = {},
     onEditTaskClick: (Task) -> Unit,
     onDeleteTaskClick: (String) -> Unit,
     onCommentClick: (Task) -> Unit,
@@ -3187,6 +3263,7 @@ fun ColumnItem(
     val hubMaxSwipePx = with(density) { 192.dp.toPx() }
     val hubPullHubsPx = with(density) { 48.dp.toPx() }
     val hubPullBoardsPx = with(density) { 96.dp.toPx() }
+    val hubPullHideTopPx = with(density) { 144.dp.toPx() }
 
     val hubColors = listOf(
         Color(0xFF2563EB), // Blue
@@ -3368,19 +3445,11 @@ fun ColumnItem(
                         var totalX = 0f
                         var totalY = 0f
                         var dragMode: Int? = null // 1 = horizontal, 2 = vertical
-                        var revealHubsFired = false
-                        var revealBoardsFired = false
-                        var collapseStepFired = false
-                        var collapseAllFired = false
                         detectDragGestures(
                             onDragStart = {
                                 totalX = 0f
                                 totalY = 0f
                                 dragMode = null
-                                revealHubsFired = false
-                                revealBoardsFired = false
-                                collapseStepFired = false
-                                collapseAllFired = false
                             },
                             onDrag = { change, dragAmount ->
                                 totalX += dragAmount.x
@@ -3395,34 +3464,27 @@ fun ColumnItem(
                                             (hubSwipeOffsetX + dragAmount.x).coerceIn(-hubMaxSwipePx, 0f)
                                     }
                                     2 -> {
+                                        // Only track distance while dragging — apply chrome once on end
+                                        // so expand/collapse animations don't fight the gesture (jank).
                                         change.consume()
-                                        when {
-                                            totalY >= hubPullBoardsPx && !revealBoardsFired -> {
-                                                revealBoardsFired = true
-                                                revealHubsFired = true
-                                                onRevealBoardsList()
-                                            }
-                                            totalY >= hubPullHubsPx && !revealHubsFired -> {
-                                                revealHubsFired = true
-                                                onRevealHubsList()
-                                            }
-                                            totalY <= -hubPullBoardsPx && !collapseAllFired -> {
-                                                collapseAllFired = true
-                                                collapseStepFired = true
-                                                onCollapseAllLists()
-                                            }
-                                            totalY <= -hubPullHubsPx && !collapseStepFired -> {
-                                                collapseStepFired = true
-                                                onCollapseOneLevel()
-                                            }
-                                        }
                                     }
                                 }
                             },
                             onDragEnd = {
-                                if (dragMode == 1) {
-                                    hubSwipeOffsetX =
-                                        if (hubSwipeOffsetX < -hubMaxSwipePx * 0.4f) -hubMaxSwipePx else 0f
+                                when (dragMode) {
+                                    1 -> {
+                                        hubSwipeOffsetX =
+                                            if (hubSwipeOffsetX < -hubMaxSwipePx * 0.4f) -hubMaxSwipePx else 0f
+                                    }
+                                    2 -> {
+                                        when {
+                                            totalY >= hubPullBoardsPx -> onRevealBoardsList()
+                                            totalY >= hubPullHubsPx -> onRevealHubsList()
+                                            totalY <= -hubPullHideTopPx -> onHideTopBar()
+                                            totalY <= -hubPullBoardsPx -> onCollapseAllLists()
+                                            totalY <= -hubPullHubsPx -> onCollapseOneLevel()
+                                        }
+                                    }
                                 }
                                 dragMode = null
                             },
