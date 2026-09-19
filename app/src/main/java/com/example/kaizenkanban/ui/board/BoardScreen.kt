@@ -1180,6 +1180,14 @@ fun BoardScreen(
                             onDismissRequest = { topBarMenuExpanded = false }
                         ) {
                             DropdownMenuItem(
+                                text = { Text(s.projects) },
+                                onClick = {
+                                    topBarMenuExpanded = false
+                                    onBack()
+                                },
+                                leadingIcon = { Icon(Icons.Default.GridView, contentDescription = null) }
+                            )
+                            DropdownMenuItem(
                                 text = { Text(s.overdueOnly) },
                                 onClick = {
                                     topBarMenuExpanded = false
@@ -1258,15 +1266,6 @@ fun BoardScreen(
                                 )
                             }
                         }
-                    }
-                },
-                navigationIcon = {
-                    IconButton(onClick = onBack, modifier = Modifier.size(44.dp)) {
-                        Icon(
-                            imageVector = Icons.Default.GridView,
-                            contentDescription = s.projects,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
