@@ -52,7 +52,7 @@ class InitializeDatabaseUseCase(
                 .trim()
 
         // 1. OKR Board setup (clean typography, no emojis)
-        val okrHubTitles = listOf("Сейчас", "Скоро", "Постоянно", "Мечта")
+        val okrHubTitles = listOf("Сегодня", "Скоро", "Постоянно", "Мечта")
         var okrBoard = findOkrBoard(allBoards, allColumns)
         if (okrBoard == null) {
             repository.clearDefaultBoards()
@@ -238,8 +238,9 @@ class InitializeDatabaseUseCase(
         val t = title.trim()
         val lower = t.lowercase()
         return when {
-            lower == "сейчас" || lower == "now" ||
-                lower.contains("действ") || lower == "actions" -> "Сейчас"
+            lower == "сегодня" || lower == "today" ||
+                lower == "сейчас" || lower == "now" ||
+                lower.contains("действ") || lower == "actions" -> "Сегодня"
 
             lower == "скоро" || lower == "soon" ||
                 lower.contains("спринт") || lower.contains("такт") || lower == "sprints" -> "Скоро"
@@ -294,12 +295,13 @@ class InitializeDatabaseUseCase(
                         "• Регулярно просматривайте этот хаб и переносите задачи на нужные доски."
                 )
 
-            clean == "сейчас" || clean == "now" || clean.contains("действ") || clean == "actions" ->
+            clean == "сегодня" || clean == "today" ||
+                clean == "сейчас" || clean == "now" || clean.contains("действ") || clean == "actions" ->
                 rule(
-                    "Rules for Now:\n" +
+                    "Rules for Today:\n" +
                         "• Concrete actions for today — one clear step you can do now.\n" +
                         "• Write as a verb: “Go to the gym”, “Do bench press”.",
-                    "Правила для хаба «Сейчас»:\n" +
+                    "Правила для хаба «Сегодня»:\n" +
                         "• Конкретное действие на сегодня — один понятный шаг.\n" +
                         "• Пишите глаголом: «Сходить в зал», «Сделать жим»."
                 )
@@ -309,10 +311,10 @@ class InitializeDatabaseUseCase(
                 rule(
                     "Rules for Soon:\n" +
                         "• The next stretch (about a week): e.g. “Gym 3 times this week”.\n" +
-                        "• Pull today’s step into Now from here.",
+                        "• Pull today’s step into Today from here.",
                     "Правила для хаба «Скоро»:\n" +
                         "• Ближайший этап (примерно неделя): например «Зал 3 раза на этой неделе».\n" +
-                        "• Отсюда берите сегодняшний шаг в «Сейчас»."
+                        "• Отсюда берите сегодняшний шаг в «Сегодня»."
                 )
 
             clean == "постоянно" || clean == "ongoing" || clean == "constantly" ||
@@ -378,16 +380,6 @@ class InitializeDatabaseUseCase(
                         "• Пожиратели времени (хронофаги): бессмысленный серфинг, пустые разговоры, рутина без пользы.\n" +
                         "• Задачи, которые можно не делать вовсе без каких-либо потерь.\n" +
                         "• Безжалостно вычеркивайте или сокращайте до минимума!"
-                )
-
-            clean == "сегодня" || clean == "today" ->
-                rule(
-                    "Rules for the Today hub:\n" +
-                        "• A realistic daily list (about 3–5 key tasks).",
-                    "Правила для хаба «Сегодня»:\n" +
-                        "• Реалистичный список задач на день (рекомендуется не более 3–5 ключевых).\n" +
-                        "• Формируется накануне вечером или ранним утром.\n" +
-                        "• Всё, что не сделано сегодня, вечером анализируется и переносится."
                 )
 
             clean.contains("на неделе") || clean.contains("this week") ->

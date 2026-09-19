@@ -123,18 +123,18 @@ class AppStrings(private val appLanguage: AppLanguage) {
     )
     val planningGuideHubsTitle get() = t("OKR hubs — from step to dream", "Хабы OKR — от шага к мечте")
     val planningGuideHubsBody get() = t(
-        "Left to right: from a concrete step to the dream.\n\n• Now — for today (e.g. leave work on time)\n• Soon — next few days (e.g. two evenings this week without work)\n• Ongoing — what you want to keep (e.g. not working late every night)\n• Dream — what it’s all for (e.g. quiet evenings when your head is free)\n\nA normal to-do list is usually one flat layer. Here, while the dream sits on the right, it’s easier not to drown in small stuff. And while “Now” sits on the left, the dream doesn’t stay only in your head.",
-        "Слева направо: от конкретного шага к мечте.\n\n• Сейчас — на сегодня (например, уйти с работы вовремя)\n• Скоро — на ближайшие дни (например, два вечера на неделе без работы)\n• Постоянно — то, что хочешь держать (например, не сидеть до ночи за задачами)\n• Мечта — зачем всё это (например, спокойные вечера, когда голова свободна)\n\nВ обычном to-do всё лежит одним слоем. Тут другое: пока справа есть мечта, легче не тонуть в мелочи. А пока слева есть «сейчас», мечта не остаётся только в голове."
+        "Left to right: from a concrete step to the dream.\n\n• Today — for this day (e.g. leave work on time)\n• Soon — next few days (e.g. two evenings this week without work)\n• Ongoing — what you want to keep (e.g. not working late every night)\n• Dream — what it’s all for (e.g. quiet evenings when your head is free)\n\nA normal to-do list is usually one flat layer. Here, while the dream sits on the right, it’s easier not to drown in small stuff. And while “Today” sits on the left, the dream doesn’t stay only in your head.",
+        "Слева направо: от конкретного шага к мечте.\n\n• Сегодня — на этот день (например, уйти с работы вовремя)\n• Скоро — на ближайшие дни (например, два вечера на неделе без работы)\n• Постоянно — то, что хочешь держать (например, не сидеть до ночи за задачами)\n• Мечта — зачем всё это (например, спокойные вечера, когда голова свободна)\n\nВ обычном to-do всё лежит одним слоем. Тут другое: пока справа есть мечта, легче не тонуть в мелочи. А пока слева есть «сегодня», мечта не остаётся только в голове."
     )
     val planningGuideDayTitle get() = t("During the day", "Как пользоваться днём")
     val planningGuideDayBody get() = t(
-        "1. Look at Now and Soon.\n2. Don’t pack the day full.\n3. Pick one task, turn on In progress, finish it.\n4. Then take the next one.\n\nThat’s the difference from jumping across ten tasks: with one in focus there’s less noise, and a better chance to finish what matters.\n\nDon’t keep new ideas in your head — quick-add them and return to the current task.\nWrite concrete steps: not “sort out work”, but “send the email” or “finish the report”.",
-        "1. Посмотри «Сейчас» и «Скоро».\n2. Не набивай день под завязку.\n3. Выбери одно дело, включи «В работе» и сделай его.\n4. Потом бери следующее.\n\nВ этом отличие от прыжков по десяти задачам сразу: пока одно в фокусе, меньше шума в голове и выше шанс закрыть важное.\n\nНовую мысль не крути в уме — запиши быстрой задачей и вернись к текущему.\nПиши конкретно: не «разобраться с работой», а «отправить письмо» или «закрыть отчёт»."
+        "1. Look at Today and Soon.\n2. Don’t pack the day full.\n3. Pick one task, turn on In progress, finish it.\n4. Then take the next one.\n\nThat’s the difference from jumping across ten tasks: with one in focus there’s less noise, and a better chance to finish what matters.\n\nDon’t keep new ideas in your head — quick-add them and return to the current task.\nWrite concrete steps: not “sort out work”, but “send the email” or “finish the report”.",
+        "1. Посмотри «Сегодня» и «Скоро».\n2. Не набивай день под завязку.\n3. Выбери одно дело, включи «В работе» и сделай его.\n4. Потом бери следующее.\n\nВ этом отличие от прыжков по десяти задачам сразу: пока одно в фокусе, меньше шума в голове и выше шанс закрыть важное.\n\nНовую мысль не крути в уме — запиши быстрой задачей и вернись к текущему.\nПиши конкретно: не «разобраться с работой», а «отправить письмо» или «закрыть отчёт»."
     )
     val planningGuideRhythmTitle get() = t("Morning, evening, week", "Утро, вечер, неделя")
     val planningGuideRhythmBody get() = t(
-        "Morning. What from Soon moves into Now? Turn on In progress.\nEvening. Mark what’s done. Move, delete, or leave the rest for tomorrow.\nOnce a week. Check Ongoing and Dream. Open the Eisenhower matrix: is everything only urgent while the important waits again?\n\nThis is where many people feel the difference: by week’s end you see not only how much you did, but where you moved.",
-        "Утро. Что из «Скоро» перенесёшь в «Сейчас»? Включи «В работе».\nВечер. Отметь сделанное. Что не успел — перенеси, удали или оставь на завтра.\nРаз в неделю. Глянь «Постоянно» и «Мечту». И матрицу Эйзенхауэра: не забито ли всё только срочным, пока важное снова ждёт.\n\nМногие здесь ловят разницу: к концу недели видно не только сколько сделал, а куда сдвинулся."
+        "Morning. What from Soon moves into Today? Turn on In progress.\nEvening. Mark what’s done. Move, delete, or leave the rest for tomorrow.\nOnce a week. Check Ongoing and Dream. Open the Eisenhower matrix: is everything only urgent while the important waits again?\n\nThis is where many people feel the difference: by week’s end you see not only how much you did, but where you moved.",
+        "Утро. Что из «Скоро» перенесёшь в «Сегодня»? Включи «В работе».\nВечер. Отметь сделанное. Что не успел — перенеси, удали или оставь на завтра.\nРаз в неделю. Глянь «Постоянно» и «Мечту». И матрицу Эйзенхауэра: не забито ли всё только срочным, пока важное снова ждёт.\n\nМногие здесь ловят разницу: к концу недели видно не только сколько сделал, а куда сдвинулся."
     )
     val planningGuideOwnTitle get() = t("If you want it your way", "Если хочешь по-своему")
     val planningGuideOwnBody get() = t(
@@ -143,8 +143,8 @@ class AppStrings(private val appLanguage: AppLanguage) {
     )
     val planningGuideStartTitle get() = t("Where to start", "С чего начать")
     val planningGuideStartBody get() = t(
-        "1. Write the Dream in a short line.\n2. In Ongoing — a habit toward it.\n3. In Soon — what to do in the next few days.\n4. In Now — one step for today.\n5. Turn on In progress and do it.\n\nTry that for one evening — then compare the feeling with ticking off ten list items. Often you won’t want to go back to a bare list.",
-        "1. Напиши «Мечту» коротко.\n2. В «Постоянно» — привычку к ней.\n3. В «Скоро» — что сделать в ближайшие дни.\n4. В «Сейчас» — один шаг на сегодня.\n5. Включи «В работе» и сделай его.\n\nСделай так один вечер — и сам сравнишь ощущение с обычным «вычеркнуть десять пунктов». Часто после этого возвращаться к голому списку уже не хочется."
+        "1. Write the Dream in a short line.\n2. In Ongoing — a habit toward it.\n3. In Soon — what to do in the next few days.\n4. In Today — one step for this day.\n5. Turn on In progress and do it.\n\nTry that for one evening — then compare the feeling with ticking off ten list items. Often you won’t want to go back to a bare list.",
+        "1. Напиши «Мечту» коротко.\n2. В «Постоянно» — привычку к ней.\n3. В «Скоро» — что сделать в ближайшие дни.\n4. В «Сегодня» — один шаг на этот день.\n5. Включи «В работе» и сделай его.\n\nСделай так один вечер — и сам сравнишь ощущение с обычным «вычеркнуть десять пунктов». Часто после этого возвращаться к голому списку уже не хочется."
     )
     val openSystemNotifications get() = t("Notification settings", "Настройки уведомлений")
     val notificationsDeniedBanner get() = t(
@@ -424,7 +424,8 @@ class AppStrings(private val appLanguage: AppLanguage) {
     private companion object {
         val NAME_MAP = mapOf(
             AppLanguage.EN to mapOf(
-                "Сейчас" to "Now",
+                "Сегодня" to "Today",
+                "Сейчас" to "Today",
                 "Скоро" to "Soon",
                 "Постоянно" to "Ongoing",
                 "Мечта" to "Dream",
@@ -442,13 +443,13 @@ class AppStrings(private val appLanguage: AppLanguage) {
                 "Контроль" to "Control",
                 "Исполнение" to "Execution",
                 "Без категории" to "Uncategorized",
-                "Сегодня" to "Today",
                 "На неделе" to "This week",
                 "Входящие" to "Inbox",
                 "Inbox" to "Inbox"
             ),
             AppLanguage.RU to mapOf(
-                "Now" to "Сейчас",
+                "Today" to "Сегодня",
+                "Now" to "Сегодня",
                 "Soon" to "Скоро",
                 "Ongoing" to "Постоянно",
                 "Constantly" to "Постоянно",
@@ -467,7 +468,6 @@ class AppStrings(private val appLanguage: AppLanguage) {
                 "Control" to "Контроль",
                 "Execution" to "Исполнение",
                 "Uncategorized" to "Без категории",
-                "Today" to "Сегодня",
                 "This week" to "На неделе",
                 "Inbox" to "Входящие"
             )

@@ -120,6 +120,8 @@ import com.example.kaizenkanban.ui.i18n.LocalAppLanguage
 import com.example.kaizenkanban.ui.i18n.LocalAppStrings
 import com.example.kaizenkanban.ui.onboarding.PlanningGuideDialog
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -613,7 +615,7 @@ fun BoardScreen(
         val hubId = pendingHubColumnId ?: return@LaunchedEffect
         val index = columns.indexOfFirst { it.id == hubId }
         if (index >= 0) {
-            lazyListState.scrollToItem(index)
+            lazyListState.animateScrollToItem(index)
             pendingHubColumnId = null
             return@LaunchedEffect
         }
@@ -623,15 +625,37 @@ fun BoardScreen(
         }
     }
 
-    val currentColumnIndex by remember {
-        derivedStateOf {
-            lazyListState.firstVisibleItemIndex.coerceIn(0, (columns.size - 1).coerceAtLeast(0))
+    // Prefer the hub closest to viewport center; update selection only after scroll settles
+    // to avoid tab/chip jitter while snap fling is still moving.
+    fun hubIndexNearCenter(): Int {
+        val layout = lazyListState.layoutInfo
+        val visible = layout.visibleItemsInfo
+        if (visible.isEmpty()) {
+            return lazyListState.firstVisibleItemIndex
+                .coerceIn(0, (columns.size - 1).coerceAtLeast(0))
         }
+        val viewportCenter = (layout.viewportStartOffset + layout.viewportEndOffset) / 2
+        return visible.minByOrNull { info ->
+            kotlin.math.abs((info.offset + info.size / 2) - viewportCenter)
+        }?.index?.coerceIn(0, (columns.size - 1).coerceAtLeast(0))
+            ?: lazyListState.firstVisibleItemIndex.coerceIn(0, (columns.size - 1).coerceAtLeast(0))
     }
 
-    LaunchedEffect(currentColumnIndex) {
-        if (columns.isNotEmpty()) {
-            tabRowState.scrollToItem((currentColumnIndex - 1).coerceAtLeast(0))
+    var currentColumnIndex by remember { mutableIntStateOf(0) }
+    LaunchedEffect(lazyListState, columns.size) {
+        snapshotFlow { lazyListState.isScrollInProgress to hubIndexNearCenter() }
+            .map { (scrolling, index) -> scrolling to index }
+            .distinctUntilChanged()
+            .collect { (scrolling, index) ->
+                if (!scrolling) {
+                    currentColumnIndex = index
+                }
+            }
+    }
+
+    LaunchedEffect(currentColumnIndex, columns.size) {
+        if (columns.isNotEmpty() && !lazyListState.isScrollInProgress) {
+            tabRowState.animateScrollToItem((currentColumnIndex - 1).coerceAtLeast(0))
         }
     }
 
@@ -878,7 +902,7 @@ fun BoardScreen(
 
                 if (dropIndex >= 0) {
                     coroutineScope.launch {
-                        lazyListState.scrollToItem(dropIndex)
+                        lazyListState.animateScrollToItem(dropIndex)
                     }
                 }
             }
@@ -982,7 +1006,7 @@ fun BoardScreen(
         )
         if (targetIndex >= 0) {
             coroutineScope.launch {
-                lazyListState.scrollToItem(targetIndex)
+                lazyListState.animateScrollToItem(targetIndex)
             }
         }
         keyboardController?.hide()
@@ -997,7 +1021,7 @@ fun BoardScreen(
             tasksInHub(col, index).any { !it.isCompleted }
         }
         if (matchIndex >= 0) {
-            lazyListState.scrollToItem(matchIndex)
+            lazyListState.animateScrollToItem(matchIndex)
         }
     }
 
@@ -1432,7 +1456,7 @@ fun BoardScreen(
                                     if (activeBoardId != b.id) {
                                         openBoardAtHub(b.id)
                                         coroutineScope.launch {
-                                            lazyListState.scrollToItem(0)
+                                            lazyListState.animateScrollToItem(0)
                                         }
                                     }
                                 },
@@ -1524,7 +1548,7 @@ fun BoardScreen(
                         onClick = {
                             if (targetBoardId == currentBoardId && scrollIndex != null) {
                                 coroutineScope.launch {
-                                    lazyListState.scrollToItem(scrollIndex)
+                                    lazyListState.animateScrollToItem(scrollIndex)
                                 }
                             } else {
                                 openBoardAtHub(targetBoardId, targetColumnId)
@@ -1595,7 +1619,7 @@ fun BoardScreen(
                                 Surface(
                                     onClick = {
                                         coroutineScope.launch {
-                                            lazyListState.scrollToItem(index)
+                                            lazyListState.animateScrollToItem(index)
                                         }
                                     },
                                     shape = RoundedCornerShape(20.dp),
@@ -1651,18 +1675,21 @@ fun BoardScreen(
                         .fillMaxWidth()
                         .weight(1f),
                     contentPadding = PaddingValues(
-                        start = 16.dp,
-                        end = 16.dp,
                         top = if (showTopBar) 16.dp else 4.dp,
                         bottom = 16.dp
                     ),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    horizontalArrangement = Arrangement.spacedBy(0.dp)
                 ) {
                     itemsIndexed(columns, key = { _, col -> col.id }) { index, column ->
                         val columnTasks = tasksInHub(column, index)
                         val prevColumn = if (index > 0) columns[index - 1] else null
                         val nextColumn = if (index < columns.size - 1) columns[index + 1] else null
-                        
+
+                        Box(
+                            modifier = Modifier
+                                .fillParentMaxWidth()
+                                .padding(horizontal = 16.dp)
+                        ) {
                         ColumnItem(
                             column = column,
                             columnIndex = index,
@@ -1708,7 +1735,7 @@ fun BoardScreen(
 
                                 if (targetIndex >= 0) {
                                     coroutineScope.launch {
-                                        lazyListState.scrollToItem(targetIndex)
+                                        lazyListState.animateScrollToItem(targetIndex)
                                     }
                                 }
                             },
@@ -1795,9 +1822,15 @@ fun BoardScreen(
                             onToggleCompleted = { completeTaskWithUndo(it) },
                             viewModel = viewModel
                         )
+                        }
                     }
                     
                     item {
+                        Box(
+                            modifier = Modifier
+                                .fillParentMaxWidth()
+                                .padding(horizontal = 16.dp)
+                        ) {
                         OutlinedButton(
                             onClick = { isAddingColumn = true },
                             modifier = Modifier
@@ -1818,6 +1851,7 @@ fun BoardScreen(
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
+                        }
                         }
                     }
                 }
@@ -2559,7 +2593,7 @@ fun BoardScreen(
                         )
                         if (targetIndex >= 0) {
                             coroutineScope.launch {
-                                lazyListState.scrollToItem(targetIndex)
+                                lazyListState.animateScrollToItem(targetIndex)
                             }
                             Toast.makeText(context, s.taskMovedToHub(s.localized(targetCol?.title.orEmpty())), Toast.LENGTH_SHORT).show()
                         } else {
@@ -2612,7 +2646,7 @@ fun BoardScreen(
                         viewModel.moveColumn(colId, direction, currentBoardId)
                         if (newIdx in columns.indices) {
                             coroutineScope.launch {
-                                lazyListState.scrollToItem(newIdx)
+                                lazyListState.animateScrollToItem(newIdx)
                             }
                         }
                     },
