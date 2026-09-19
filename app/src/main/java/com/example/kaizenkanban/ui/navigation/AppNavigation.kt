@@ -247,6 +247,11 @@ fun AppNavigation(
                     navController.navigate("calendar") {
                         launchSingleTop = true
                     }
+                },
+                onNavigateToSettings = {
+                    navController.navigate("settings") {
+                        launchSingleTop = true
+                    }
                 }
             )
         }

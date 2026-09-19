@@ -7,6 +7,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -64,6 +66,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Label
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.ViewAgenda
 import androidx.compose.material.icons.filled.Visibility
@@ -84,12 +87,10 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
-import androidx.compose.ui.input.nestedscroll.NestedScrollSource
-import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
@@ -108,7 +109,6 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
@@ -325,6 +325,7 @@ fun BoardScreen(
     windowSizeClass: WindowWidthSizeClass,
     onBack: () -> Unit,
     onNavigateToCalendar: () -> Unit = {},
+    onNavigateToSettings: () -> Unit = {},
     initialColumnId: String? = null,
     initialTaskId: String? = null
 ) {
@@ -699,60 +700,7 @@ fun BoardScreen(
     }
 
     val currentColumnIndexState = rememberUpdatedState(currentColumnIndex)
-    val columnsState = rememberUpdatedState(columns)
-    val edgePullPx = remember { mutableFloatStateOf(0f) }
-    val hubWrapConnection = remember {
-        object : NestedScrollConnection {
-            override fun onPostScroll(
-                consumed: Offset,
-                available: Offset,
-                source: NestedScrollSource
-            ): Offset {
-                if (source != NestedScrollSource.Drag && source != NestedScrollSource.Fling) {
-                    return Offset.Zero
-                }
-                val cols = columnsState.value
-                if (cols.size < 2) {
-                    edgePullPx.floatValue = 0f
-                    return Offset.Zero
-                }
-                val current = currentColumnIndexState.value.coerceIn(0, cols.lastIndex)
-                when {
-                    current == 0 && available.x > 0f ->
-                        edgePullPx.floatValue += available.x
-                    current == cols.lastIndex && available.x < 0f ->
-                        edgePullPx.floatValue += available.x
-                    else ->
-                        edgePullPx.floatValue = 0f
-                }
-                return Offset.Zero
-            }
-
-            override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
-                val cols = columnsState.value
-                if (cols.size < 2) {
-                    edgePullPx.floatValue = 0f
-                    return Velocity.Zero
-                }
-                val current = currentColumnIndexState.value.coerceIn(0, cols.lastIndex)
-                val pull = edgePullPx.floatValue
-                edgePullPx.floatValue = 0f
-                val velocityThreshold = 400f
-                val pullThreshold = 96f
-                // Positive ≈ toward previous (wrap to last); negative ≈ toward next (wrap to first).
-                val target = when {
-                    current == 0 && (available.x > velocityThreshold || pull > pullThreshold) ->
-                        cols.lastIndex
-                    current == cols.lastIndex && (available.x < -velocityThreshold || pull < -pullThreshold) ->
-                        0
-                    else -> return Velocity.Zero
-                }
-                lazyListState.animateScrollToItem(target)
-                currentColumnIndex = target
-                return available
-            }
-        }
-    }
+    val columnsSizeState = rememberUpdatedState(columns.size)
 
     LaunchedEffect(lazyListState, columns.size) {
         snapshotFlow { lazyListState.isScrollInProgress }
@@ -777,6 +725,7 @@ fun BoardScreen(
 
     // Drag state — position floats stay out of composition so DnD doesn't rebuild the whole board
     var draggedTask by remember { mutableStateOf<Task?>(null) }
+    val dragActiveState = rememberUpdatedState(draggedTask != null)
     val dragPosX = remember { mutableFloatStateOf(0f) }
     val dragPosY = remember { mutableFloatStateOf(0f) }
     val columnBounds = remember { mutableMapOf<String, androidx.compose.ui.geometry.Rect>() }
@@ -1183,17 +1132,53 @@ fun BoardScreen(
                     Column(modifier = Modifier.fillMaxWidth()) {
                     TopAppBar(
                 title = {
-                    Text(
-                        text = board?.name?.let { s.localized(it) } ?: s.board,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.basicMarquee(
-                            iterations = Int.MAX_VALUE,
-                            initialDelayMillis = 1200,
-                            delayMillis = 1500
-                        )
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .weight(1f, fill = false)
+                                .clickable { showBoardsList = !showBoardsList }
+                                .padding(end = 2.dp)
+                        ) {
+                            Text(
+                                text = board?.name?.let { s.localized(it) } ?: s.board,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier
+                                    .weight(1f, fill = false)
+                                    .basicMarquee(
+                                        iterations = Int.MAX_VALUE,
+                                        initialDelayMillis = 1200,
+                                        delayMillis = 1500
+                                    )
+                            )
+                            Icon(
+                                imageVector = if (showBoardsList) {
+                                    Icons.Default.KeyboardArrowUp
+                                } else {
+                                    Icons.Default.KeyboardArrowDown
+                                },
+                                contentDescription = if (showBoardsList) s.hideBoardsList else s.showBoardsList,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                        IconButton(
+                            onClick = onBack,
+                            modifier = Modifier.size(40.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.GridView,
+                                contentDescription = s.projects,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                    }
                 },
                 actions = {
                     IconButton(
@@ -1294,6 +1279,14 @@ fun BoardScreen(
                                     onBack()
                                 },
                                 leadingIcon = { Icon(Icons.Default.GridView, contentDescription = null) }
+                            )
+                            DropdownMenuItem(
+                                text = { Text(s.settings) },
+                                onClick = {
+                                    topBarMenuExpanded = false
+                                    onNavigateToSettings()
+                                },
+                                leadingIcon = { Icon(Icons.Default.Settings, contentDescription = null) }
                             )
                             val currentHub = columns.getOrNull(currentColumnIndex)
                             val isCurrentPrimary = currentHub != null && isPrimaryHub(currentHub.id, currentColumnIndex)
@@ -1777,10 +1770,49 @@ fun BoardScreen(
                     userScrollEnabled = draggedTask == null,
                     modifier = Modifier
                         .fillMaxSize()
-                        .then(
-                            if (draggedTask == null) Modifier.nestedScroll(hubWrapConnection)
-                            else Modifier
-                        ),
+                        .pointerInput(currentColumnIndex, columns.size) {
+                            // Only intercept at first/last hub — keeps middle swipes snappy.
+                            val count = columnsSizeState.value
+                            if (count < 2) return@pointerInput
+                            val edgeIndex = currentColumnIndexState.value.coerceIn(0, count - 1)
+                            if (edgeIndex != 0 && edgeIndex != count - 1) return@pointerInput
+                            val pullThreshold = 64f
+                            val maxListMove = 48f
+                            awaitEachGesture {
+                                awaitFirstDown(requireUnconsumed = false)
+                                if (dragActiveState.value) return@awaitEachGesture
+                                val startIndex = currentColumnIndexState.value.coerceIn(0, count - 1)
+                                if (startIndex != 0 && startIndex != count - 1) return@awaitEachGesture
+                                val startFirst = lazyListState.firstVisibleItemIndex
+                                val startOffset = lazyListState.firstVisibleItemScrollOffset
+                                var totalDx = 0f
+                                while (true) {
+                                    val event = awaitPointerEvent(PointerEventPass.Final)
+                                    event.changes.forEach { change ->
+                                        if (change.pressed) {
+                                            totalDx += change.positionChange().x
+                                        }
+                                    }
+                                    if (event.changes.none { it.pressed }) break
+                                }
+                                if (dragActiveState.value) return@awaitEachGesture
+                                val listMoved = abs(lazyListState.firstVisibleItemScrollOffset - startOffset) +
+                                    abs(lazyListState.firstVisibleItemIndex - startFirst) * 1000
+                                val stayedOnHub = listMoved < maxListMove &&
+                                    lazyListState.firstVisibleItemIndex == startFirst
+                                val target = when {
+                                    startIndex == 0 && stayedOnHub && totalDx > pullThreshold ->
+                                        count - 1
+                                    startIndex == count - 1 && stayedOnHub && totalDx < -pullThreshold ->
+                                        0
+                                    else -> return@awaitEachGesture
+                                }
+                                coroutineScope.launch {
+                                    lazyListState.animateScrollToItem(target)
+                                    currentColumnIndex = target
+                                }
+                            }
+                        },
                     contentPadding = PaddingValues(
                         top = if (showTopBar) 16.dp else 4.dp,
                         bottom = 16.dp
