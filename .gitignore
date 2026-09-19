@@ -22,3 +22,9 @@ permissions.json
 
 # Local backup of excluded files (outside VCS intent)
 /not-for-github/
+
+# Release signing (never commit)
+keystore.properties
+*.jks
+*.keystore
+*.jks.b64
