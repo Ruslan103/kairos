@@ -115,6 +115,17 @@ class KairosPreferences(context: Context) {
         prefs.edit().putStringSet(KEY_MANUAL_ORDER_COLUMNS, current + columnId).apply()
     }
 
+    /** Primary (home) hub for a board — opened first when entering the board. */
+    fun getPrimaryHubId(boardId: String): String? {
+        return prefs.getString(primaryHubKey(boardId), null)?.takeIf { it.isNotBlank() }
+    }
+
+    fun setPrimaryHubId(boardId: String, columnId: String?) {
+        prefs.edit().putString(primaryHubKey(boardId), columnId.orEmpty()).apply()
+    }
+
+    private fun primaryHubKey(boardId: String) = "$KEY_PRIMARY_HUB_PREFIX$boardId"
+
     private companion object {
         const val PREFS_NAME = "kairos_prefs"
         const val KEY_LANGUAGE = "app_language"
@@ -135,5 +146,6 @@ class KairosPreferences(context: Context) {
         const val KEY_PROJECTS_COLLAPSED = "projects_collapsed"
         const val KEY_OKR_BOARD_ID = "okr_board_id"
         const val KEY_EISENHOWER_BOARD_ID = "eisenhower_board_id"
+        const val KEY_PRIMARY_HUB_PREFIX = "primary_hub_"
     }
 }

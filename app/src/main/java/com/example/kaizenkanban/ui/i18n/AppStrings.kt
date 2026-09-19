@@ -187,6 +187,8 @@ class AppStrings(private val appLanguage: AppLanguage) {
     val moreActions get() = t("More", "Ещё")
     val showMenu get() = t("Show menu", "Показать меню")
     val projects get() = t("Projects", "Проекты")
+    val setPrimaryHub get() = t("Set as primary hub", "Сделать основным хабом")
+    val primaryHub get() = t("Primary hub", "Основной хаб")
     val executionMode get() = t("Execution mode", "Режим исполнения")
     val planningMode get() = t("Planning mode", "Режим планирования")
     val addTask get() = t("Add task", "Добавить задачу")

@@ -64,6 +64,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Label
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.ViewAgenda
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -83,6 +84,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
@@ -104,6 +108,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
@@ -610,15 +615,62 @@ fun BoardScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val flingBehavior = rememberSnapFlingBehavior(lazyListState = lazyListState)
     var currentColumnIndex by remember { mutableIntStateOf(0) }
+    var primaryHubId by remember(currentBoardId) {
+        mutableStateOf(kairosPrefs.getPrimaryHubId(currentBoardId))
+    }
+    var lastBoardOpenedForPrimary by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(currentBoardId, columns.size) {
-        currentColumnIndex = 0.coerceIn(0, (columns.size - 1).coerceAtLeast(0))
+    fun primaryHubIndex(): Int {
+        if (columns.isEmpty()) return 0
+        val preferred = primaryHubId
+        val idx = if (preferred != null) columns.indexOfFirst { it.id == preferred } else -1
+        return if (idx >= 0) idx else 0
+    }
+
+    fun isPrimaryHub(columnId: String, index: Int): Boolean {
+        val preferred = primaryHubId
+        if (preferred == null) return index == 0
+        val stillExists = columns.any { it.id == preferred }
+        return if (stillExists) columnId == preferred else index == 0
+    }
+
+    LaunchedEffect(currentBoardId) {
+        val stored = kairosPrefs.getPrimaryHubId(currentBoardId)
+        primaryHubId = stored
+    }
+
+    // Clear stale primary hub id when the column was deleted.
+    LaunchedEffect(currentBoardId, columns.map { it.id }) {
+        val stored = primaryHubId ?: return@LaunchedEffect
+        if (columns.none { it.id == stored }) {
+            primaryHubId = null
+            kairosPrefs.setPrimaryHubId(currentBoardId, null)
+        }
+    }
+
+    // Open primary hub only when the board actually changes (not on every task/columns emit).
+    LaunchedEffect(currentBoardId, columns.isNotEmpty()) {
+        if (pendingHubColumnId != null) return@LaunchedEffect
+        if (columns.isEmpty()) return@LaunchedEffect
+        if (lastBoardOpenedForPrimary == currentBoardId) {
+            if (currentColumnIndex !in columns.indices) {
+                val index = primaryHubIndex()
+                currentColumnIndex = index
+                lazyListState.scrollToItem(index)
+            }
+            return@LaunchedEffect
+        }
+        lastBoardOpenedForPrimary = currentBoardId
+        val index = primaryHubIndex()
+        currentColumnIndex = index
+        lazyListState.scrollToItem(index)
     }
 
     LaunchedEffect(currentBoardId, pendingHubColumnId, columns) {
         val hubId = pendingHubColumnId ?: return@LaunchedEffect
         val index = columns.indexOfFirst { it.id == hubId }
         if (index >= 0) {
+            lastBoardOpenedForPrimary = currentBoardId
             lazyListState.animateScrollToItem(index)
             currentColumnIndex = index
             pendingHubColumnId = null
@@ -644,6 +696,62 @@ fun BoardScreen(
             kotlin.math.abs((info.offset + info.size / 2) - viewportCenter)
         }?.index?.coerceIn(0, (columns.size - 1).coerceAtLeast(0))
             ?: lazyListState.firstVisibleItemIndex.coerceIn(0, (columns.size - 1).coerceAtLeast(0))
+    }
+
+    val currentColumnIndexState = rememberUpdatedState(currentColumnIndex)
+    val columnsState = rememberUpdatedState(columns)
+    val edgePullPx = remember { mutableFloatStateOf(0f) }
+    val hubWrapConnection = remember {
+        object : NestedScrollConnection {
+            override fun onPostScroll(
+                consumed: Offset,
+                available: Offset,
+                source: NestedScrollSource
+            ): Offset {
+                if (source != NestedScrollSource.Drag && source != NestedScrollSource.Fling) {
+                    return Offset.Zero
+                }
+                val cols = columnsState.value
+                if (cols.size < 2) {
+                    edgePullPx.floatValue = 0f
+                    return Offset.Zero
+                }
+                val current = currentColumnIndexState.value.coerceIn(0, cols.lastIndex)
+                when {
+                    current == 0 && available.x > 0f ->
+                        edgePullPx.floatValue += available.x
+                    current == cols.lastIndex && available.x < 0f ->
+                        edgePullPx.floatValue += available.x
+                    else ->
+                        edgePullPx.floatValue = 0f
+                }
+                return Offset.Zero
+            }
+
+            override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
+                val cols = columnsState.value
+                if (cols.size < 2) {
+                    edgePullPx.floatValue = 0f
+                    return Velocity.Zero
+                }
+                val current = currentColumnIndexState.value.coerceIn(0, cols.lastIndex)
+                val pull = edgePullPx.floatValue
+                edgePullPx.floatValue = 0f
+                val velocityThreshold = 400f
+                val pullThreshold = 96f
+                // Positive ≈ toward previous (wrap to last); negative ≈ toward next (wrap to first).
+                val target = when {
+                    current == 0 && (available.x > velocityThreshold || pull > pullThreshold) ->
+                        cols.lastIndex
+                    current == cols.lastIndex && (available.x < -velocityThreshold || pull < -pullThreshold) ->
+                        0
+                    else -> return Velocity.Zero
+                }
+                lazyListState.animateScrollToItem(target)
+                currentColumnIndex = target
+                return available
+            }
+        }
     }
 
     LaunchedEffect(lazyListState, columns.size) {
@@ -1187,6 +1295,35 @@ fun BoardScreen(
                                 },
                                 leadingIcon = { Icon(Icons.Default.GridView, contentDescription = null) }
                             )
+                            val currentHub = columns.getOrNull(currentColumnIndex)
+                            val isCurrentPrimary = currentHub != null && isPrimaryHub(currentHub.id, currentColumnIndex)
+                            DropdownMenuItem(
+                                text = { Text(if (isCurrentPrimary) s.primaryHub else s.setPrimaryHub) },
+                                onClick = {
+                                    topBarMenuExpanded = false
+                                    val hub = columns.getOrNull(currentColumnIndex) ?: return@DropdownMenuItem
+                                    primaryHubId = hub.id
+                                    kairosPrefs.setPrimaryHubId(currentBoardId, hub.id)
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        Icons.Default.Star,
+                                        contentDescription = null,
+                                        tint = if (isCurrentPrimary) {
+                                            MaterialTheme.colorScheme.primary
+                                        } else {
+                                            LocalContentColor.current
+                                        }
+                                    )
+                                },
+                                trailingIcon = if (isCurrentPrimary) {
+                                    {
+                                        Icon(Icons.Default.Check, contentDescription = null)
+                                    }
+                                } else {
+                                    null
+                                }
+                            )
                             DropdownMenuItem(
                                 text = { Text(s.overdueOnly) },
                                 onClick = {
@@ -1462,9 +1599,6 @@ fun BoardScreen(
                                 onClick = {
                                     if (activeBoardId != b.id) {
                                         openBoardAtHub(b.id)
-                                        coroutineScope.launch {
-                                            lazyListState.animateScrollToItem(0)
-                                        }
                                     }
                                 },
                                 modifier = Modifier
@@ -1566,6 +1700,7 @@ fun BoardScreen(
                             itemsIndexed(columns, key = { _, col -> col.id }) { index, col ->
                                 val isSelected = index == currentColumnIndex
                                 val colTaskCount = tasksInHub(col, index).count { !it.isCompleted && !it.isHidden }
+                                val showPrimaryMark = isPrimaryHub(col.id, index)
 
                                 Surface(
                                     onClick = {
@@ -1585,6 +1720,19 @@ fun BoardScreen(
                                             .padding(horizontal = 14.dp, vertical = 8.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
+                                        if (showPrimaryMark) {
+                                            Icon(
+                                                imageVector = Icons.Default.Star,
+                                                contentDescription = s.primaryHub,
+                                                modifier = Modifier.size(14.dp),
+                                                tint = if (isSelected) {
+                                                    MaterialTheme.colorScheme.onPrimary
+                                                } else {
+                                                    MaterialTheme.colorScheme.primary
+                                                }
+                                            )
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                        }
                                         Text(
                                             text = s.localized(col.title),
                                             style = MaterialTheme.typography.bodyMedium,
@@ -1627,7 +1775,12 @@ fun BoardScreen(
                     state = lazyListState,
                     flingBehavior = if (draggedTask != null) ScrollableDefaults.flingBehavior() else flingBehavior,
                     userScrollEnabled = draggedTask == null,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .then(
+                            if (draggedTask == null) Modifier.nestedScroll(hubWrapConnection)
+                            else Modifier
+                        ),
                     contentPadding = PaddingValues(
                         top = if (showTopBar) 16.dp else 4.dp,
                         bottom = 16.dp
@@ -1636,8 +1789,16 @@ fun BoardScreen(
                 ) {
                     itemsIndexed(columns, key = { _, col -> col.id }) { index, column ->
                         val columnTasks = tasksInHub(column, index)
-                        val prevColumn = if (index > 0) columns[index - 1] else null
-                        val nextColumn = if (index < columns.size - 1) columns[index + 1] else null
+                        val prevColumn = when {
+                            columns.size < 2 -> null
+                            index > 0 -> columns[index - 1]
+                            else -> columns.last()
+                        }
+                        val nextColumn = when {
+                            columns.size < 2 -> null
+                            index < columns.size - 1 -> columns[index + 1]
+                            else -> columns.first()
+                        }
 
                         Box(
                             modifier = Modifier.fillParentMaxWidth(),
@@ -5001,8 +5162,16 @@ fun MoveTaskDialog(
     var expandedBoardId by remember { mutableStateOf(initialExpandedBoardId) }
     val currentColumnIndex = columns.indexOfFirst { it.id == sourceColumnId }.takeIf { it >= 0 }
         ?: columns.indexOfFirst { col -> taskAppearsOnColumn(task, col, allColumns, boards) }
-    val prevColumn = if (currentColumnIndex > 0) columns[currentColumnIndex - 1] else null
-    val nextColumn = if (currentColumnIndex >= 0 && currentColumnIndex < columns.size - 1) columns[currentColumnIndex + 1] else null
+    val prevColumn = when {
+        columns.size < 2 || currentColumnIndex !in columns.indices -> null
+        currentColumnIndex > 0 -> columns[currentColumnIndex - 1]
+        else -> columns.last()
+    }
+    val nextColumn = when {
+        columns.size < 2 || currentColumnIndex !in columns.indices -> null
+        currentColumnIndex < columns.size - 1 -> columns[currentColumnIndex + 1]
+        else -> columns.first()
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
