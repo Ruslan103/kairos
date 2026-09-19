@@ -1,0 +1,24 @@
+*.iml
+.gradle
+/local.properties
+local.properties
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+app/build/
+build/
+*.hprof
+.kotlin/
+
+# IDE
+.idea/
+
+# Cursor / AI tooling (local only)
+.cursor/
+rules/
+permissions.json
+
+# Local backup of excluded files (outside VCS intent)
+/not-for-github/
