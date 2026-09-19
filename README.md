@@ -5,7 +5,7 @@
 [![Room](https://img.shields.io/badge/Room%20DB-2.6.1-orange?style=flat&logo=sqlite&logoColor=white)](https://developer.android.com/training/data-storage/room)
 [![Architecture](https://img.shields.io/badge/Architecture-Clean%20%2B%20SOLID%20%2B%20MVVM-success)](#архитектура)
 [![API](https://img.shields.io/badge/Min%20SDK-26%2B-brightgreen)](https://android-arsenal.com/api?level=26)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: Non-Commercial](https://img.shields.io/badge/License-Non--Commercial-orange.svg)](LICENSE)
 
 **Язык:** [Русский](README.md) · [English](README.en.md)
 
@@ -181,8 +181,12 @@ app/src/main/java/com/example/kaizenkanban/
 
 ## 📄 Лицензия
 
-Проект распространяется под лицензией [MIT](LICENSE).
+Проект распространяется по **Kairos Source License (Non-Commercial)** — см. [LICENSE](LICENSE).
 
 **Copyright (c) 2026 Ruslan (`JIuMaPk@gmail.ru`).**
 
-Условие MIT: при любом копировании или распространении (включая форки и сборки) необходимо сохранять уведомление об авторских правах и текст лицензии.
+Разрешено: просмотр, копирование, изменение и некоммерческое распространение **с сохранением указания автора**.
+
+Запрещено без письменного согласия автора: продажа, платное лицензирование и любое коммерческое использование (включая готовые APK и встраивание в коммерческий продукт).
+
+За разрешением на коммерческое использование: `JIuMaPk@gmail.ru`.
