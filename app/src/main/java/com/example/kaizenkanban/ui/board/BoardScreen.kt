@@ -151,8 +151,20 @@ import com.example.kaizenkanban.ui.theme.inProgressColor
 import com.example.kaizenkanban.ui.theme.inProgressGradient
 import com.example.kaizenkanban.ui.viewmodel.SharedViewModel
 
-fun Long.formatDate(locale: Locale = Locale.getDefault()): String = SimpleDateFormat("dd MMM yyyy", locale).format(Date(this))
-fun Long.formatDateTime(locale: Locale = Locale.getDefault()): String = SimpleDateFormat("dd MMM yyyy, HH:mm", locale).format(Date(this))
+fun Long.formatDate(locale: Locale = Locale.getDefault()): String =
+    cachedDateFormat(locale, "dd MMM yyyy").format(Date(this))
+
+fun Long.formatDateTime(locale: Locale = Locale.getDefault()): String =
+    cachedDateFormat(locale, "dd MMM yyyy, HH:mm").format(Date(this))
+
+private val dateFormatCache =
+    ThreadLocal.withInitial { HashMap<String, SimpleDateFormat>() }
+
+private fun cachedDateFormat(locale: Locale, pattern: String): SimpleDateFormat {
+    val key = "${locale.toLanguageTag()}|$pattern"
+    val map = dateFormatCache.get()
+    return map.getOrPut(key) { SimpleDateFormat(pattern, locale) }
+}
 
 private data class TaskDropPreview(
     val columnId: String,
@@ -512,6 +524,21 @@ fun BoardScreen(
     fun tasksInHub(column: Column, colIndex: Int = 0): List<Task> =
         tasksByHubId[column.id] ?: emptyList()
 
+    // Precompute once — relatedBoardsForTask is expensive if run per TaskCard recomposition.
+    val relatedBoardsByTaskId = remember(tasksByHubId, state.columns, state.boards, currentBoardId) {
+        buildMap {
+            tasksByHubId.values.asSequence()
+                .flatten()
+                .distinctBy { it.id }
+                .forEach { task ->
+                    put(
+                        task.id,
+                        relatedBoardsForTask(task, currentBoardId, state.columns, state.boards)
+                    )
+                }
+        }
+    }
+
     fun openBoardAtHub(targetBoardId: String, targetColumnId: String? = null) {
         if (targetColumnId != null) pendingHubColumnId = targetColumnId
         if (activeBoardId != targetBoardId) {
@@ -729,7 +756,7 @@ fun BoardScreen(
 
     suspend fun remapHubPagerClones() {
         if (!hubLoop) return
-        when (hubVirtualNearCenter()) {
+        when (lazyListState.firstVisibleItemIndex) {
             cloneAddVirtual -> {
                 // Clone of «new hub» → real add page (last in carousel).
                 lazyListState.scrollToItem(addHubVirtual)
@@ -768,24 +795,25 @@ fun BoardScreen(
             )
         }
             .distinctUntilChanged()
-            .collect { (scrolling, dragging, _) ->
+            .collect { (scrolling, dragging, indexOffset) ->
                 if (dragging || scrolling) return@collect
+                val (index, offset) = indexOffset
+                // Wait until snap has fully rested — remapping mid-settle causes hitch on weak GPUs.
+                if (offset > 2) return@collect
                 if (!hubLoop) {
-                    val virtual = hubVirtualNearCenter()
-                    if (!isAddHubVirtual(virtual)) {
-                        val real = virtualToReal(virtual)
+                    if (!isAddHubVirtual(index)) {
+                        val real = virtualToReal(index)
                         if (real != currentColumnIndex) currentColumnIndex = real
                     }
                     return@collect
                 }
-                when (val virtual = hubVirtualNearCenter()) {
+                when (index) {
                     cloneAddVirtual -> remapHubPagerClones()
                     cloneFirstVirtual -> remapHubPagerClones()
                     in 1..hubCount -> {
-                        val real = virtual - 1
+                        val real = index - 1
                         if (real != currentColumnIndex) currentColumnIndex = real
                     }
-                    // addHubVirtual: leave chip selection as-is
                 }
             }
     }
@@ -2033,6 +2061,8 @@ fun BoardScreen(
                             isDropTarget = !isWrapClone && dropPreview?.columnId == column.id,
                             dropInsertIndex = if (isWrapClone) null
                             else dropPreview?.takeIf { it.columnId == column.id }?.insertIndex,
+                            reportPositions = !isWrapClone,
+                            relatedBoardsByTaskId = relatedBoardsByTaskId,
                             onHubScrollState = {
                                 if (!isWrapClone) hubScrollStates[column.id] = it
                             },
@@ -3235,6 +3265,8 @@ fun ColumnItem(
     isCompactMode: Boolean = false,
     isDropTarget: Boolean = false,
     dropInsertIndex: Int? = null,
+    reportPositions: Boolean = false,
+    relatedBoardsByTaskId: Map<String, List<RelatedBoardLink>> = emptyMap(),
     onHubScrollState: (androidx.compose.foundation.lazy.LazyListState) -> Unit = {},
     onHubListPositioned: (androidx.compose.ui.geometry.Rect) -> Unit = {},
     onToggleCompleted: (Task) -> Unit = {},
@@ -3288,13 +3320,23 @@ fun ColumnItem(
                 color = if (isDropTarget) MaterialTheme.colorScheme.primary else Color.Transparent,
                 shape = RoundedCornerShape(12.dp)
             )
-            .onGloballyPositioned { coordinates ->
-                val bounds = androidx.compose.ui.geometry.Rect(
-                    offset = coordinates.positionInRoot(),
-                    size = androidx.compose.ui.geometry.Size(coordinates.size.width.toFloat(), coordinates.size.height.toFloat())
-                )
-                onColumnPositioned(bounds)
-            }
+            .then(
+                if (reportPositions) {
+                    Modifier.onGloballyPositioned { coordinates ->
+                        onColumnPositioned(
+                            androidx.compose.ui.geometry.Rect(
+                                offset = coordinates.positionInRoot(),
+                                size = androidx.compose.ui.geometry.Size(
+                                    coordinates.size.width.toFloat(),
+                                    coordinates.size.height.toFloat()
+                                )
+                            )
+                        )
+                    }
+                } else {
+                    Modifier
+                }
+            )
             .padding(12.dp)
     ) {
         // Swipeable Hub Header: pulling left reveals Rename and Delete
@@ -3578,17 +3620,23 @@ fun ColumnItem(
             state = hubListState,
             modifier = Modifier
                 .fillMaxHeight()
-                .onGloballyPositioned { coordinates ->
-                    onHubListPositioned(
-                        androidx.compose.ui.geometry.Rect(
-                            offset = coordinates.positionInRoot(),
-                            size = androidx.compose.ui.geometry.Size(
-                                coordinates.size.width.toFloat(),
-                                coordinates.size.height.toFloat()
+                .then(
+                    if (reportPositions) {
+                        Modifier.onGloballyPositioned { coordinates ->
+                            onHubListPositioned(
+                                androidx.compose.ui.geometry.Rect(
+                                    offset = coordinates.positionInRoot(),
+                                    size = androidx.compose.ui.geometry.Size(
+                                        coordinates.size.width.toFloat(),
+                                        coordinates.size.height.toFloat()
+                                    )
+                                )
                             )
-                        )
-                    )
-                },
+                        }
+                    } else {
+                        Modifier
+                    }
+                ),
             contentPadding = PaddingValues(bottom = 88.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
@@ -3610,7 +3658,7 @@ fun ColumnItem(
             } else {
                 itemsIndexed(visibleActiveTasks, key = { _, task -> task.id }) { index, task ->
                     val taskCommentsCount = commentCountByTaskId[task.id] ?: 0
-                    val relatedBoards = relatedBoardsForTask(task, currentBoardId, allColumns, boards)
+                    val relatedBoards = relatedBoardsByTaskId[task.id].orEmpty()
                     val filteredIndex = if (draggedTaskId == null) index
                     else visibleActiveTasks.take(index).count { it.id != draggedTaskId }
 
@@ -3663,6 +3711,7 @@ fun ColumnItem(
                         } else null,
                         onCommentClick = { onCommentClick(task) },
                         onMoveClick = { onMoveTaskClick(task) },
+                        reportPosition = reportPositions,
                         onPositioned = { rect -> onTaskPositioned(task, rect) },
                         onDragStart = { offset -> onDragStart(task, offset) },
                         onDrag = onDrag,
@@ -3738,7 +3787,7 @@ fun ColumnItem(
                     if (showCompleted) {
                         items(completedTasks, key = { it.id }) { task ->
                             val taskCommentsCount = commentCountByTaskId[task.id] ?: 0
-                            val relatedBoards = relatedBoardsForTask(task, currentBoardId, allColumns, boards)
+                            val relatedBoards = relatedBoardsByTaskId[task.id].orEmpty()
 
                             TaskCard(
                                 task = task,
@@ -3776,6 +3825,7 @@ fun ColumnItem(
                                 } else null,
                                 onCommentClick = { onCommentClick(task) },
                                 onMoveClick = { onMoveTaskClick(task) },
+                                reportPosition = reportPositions,
                                 onPositioned = { rect -> onTaskPositioned(task, rect) },
                                 onDragStart = { offset -> onDragStart(task, offset) },
                                 onDrag = onDrag,
@@ -3845,7 +3895,8 @@ fun TaskCard(
     onQuickMoveNext: (() -> Unit)? = null,
     onCommentClick: () -> Unit = {},
     onMoveClick: () -> Unit = {},
-    onPositioned: (androidx.compose.ui.geometry.Rect) -> Unit,
+    reportPosition: Boolean = false,
+    onPositioned: (androidx.compose.ui.geometry.Rect) -> Unit = {},
     onDragStart: (Offset) -> Unit,
     onDrag: (Offset) -> Unit,
     onDragEnd: () -> Unit,
@@ -3856,7 +3907,9 @@ fun TaskCard(
     val context = LocalContext.current
     val s = LocalAppStrings.current
     val dateLocale = LocalAppLanguage.current.locale
-    val category = categories.find { it.id == task.categoryId }
+    val category = remember(categories, task.categoryId) {
+        categories.find { it.id == task.categoryId }
+    }
     val hasStatus = category != null && !KanbanNames.isUncategorized(category.name)
 
     val toggleCompleted = {
@@ -3884,7 +3937,12 @@ fun TaskCard(
             minOf(actionsWidthPx, (cardWidthPx - peekPx).coerceAtLeast(0f))
         }
     }
-    var cardBoundsInRoot by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
+    // LayoutCoordinates ref — no Compose state writes during hub swipe (avoids card recomposition).
+    val layoutCoordsRef = remember {
+        object {
+            var coords: androidx.compose.ui.layout.LayoutCoordinates? = null
+        }
+    }
     var showDueEditor by remember(task.id) { mutableStateOf(false) }
     var showDueDatePicker by remember(task.id) { mutableStateOf(false) }
     val dueDatePickerState = rememberDatePickerState(
@@ -3944,12 +4002,20 @@ fun TaskCard(
             .graphicsLayer { alpha = targetAlpha }
             .onSizeChanged { cardWidthPx = it.width.toFloat() }
             .onGloballyPositioned { coordinates ->
-                val bounds = androidx.compose.ui.geometry.Rect(
-                    offset = coordinates.positionInRoot(),
-                    size = androidx.compose.ui.geometry.Size(coordinates.size.width.toFloat(), coordinates.size.height.toFloat())
-                )
-                cardBoundsInRoot = bounds
-                onPositioned(bounds)
+                layoutCoordsRef.coords = coordinates
+                // Always refresh parent hit-maps when requested. Writing into mutableMap
+                // (not Compose state) so hub swipes don't recompose every TaskCard.
+                if (reportPosition) {
+                    onPositioned(
+                        androidx.compose.ui.geometry.Rect(
+                            offset = coordinates.positionInRoot(),
+                            size = androidx.compose.ui.geometry.Size(
+                                coordinates.size.width.toFloat(),
+                                coordinates.size.height.toFloat()
+                            )
+                        )
+                    )
+                }
             }
             .then(
                 if (isDragPreview) Modifier else Modifier.pointerInput(task.id, maxSwipePx) {
@@ -4184,7 +4250,9 @@ fun TaskCard(
                                 detectDragGesturesAfterLongPress(
                                     onDragStart = { localOffset ->
                                         swipeOffsetX = 0f
-                                        onDragStart(cardBoundsInRoot.topLeft + localOffset)
+                                        onDragStart(
+                                            (layoutCoordsRef.coords?.positionInRoot() ?: Offset.Zero) + localOffset
+                                        )
                                     },
                                     onDrag = { change, dragAmount ->
                                         change.consume()
@@ -4375,7 +4443,9 @@ fun TaskCard(
                             detectDragGesturesAfterLongPress(
                                 onDragStart = { localOffset ->
                                     swipeOffsetX = 0f
-                                    onDragStart(cardBoundsInRoot.topLeft + localOffset)
+                                    onDragStart(
+                                        (layoutCoordsRef.coords?.positionInRoot() ?: Offset.Zero) + localOffset
+                                    )
                                 },
                                 onDrag = { change, dragAmount ->
                                     change.consume()
