@@ -57,6 +57,7 @@ It connects long-term goals with today’s actions:
 - Other tasks fade so you can stay in flow.
 
 ### 4. Drag & drop and swipe-to-reveal
+- **Double-tap the board name** to open all projects.
 - **Swipe left on a task:** Comments, Edit, Delete.
 - **Swipe left on a hub header:** Rename, Delete.
 - **Compact hub navigation** under a task: `[ ◀ ] [ 📁 ] [ ▶ ]`.

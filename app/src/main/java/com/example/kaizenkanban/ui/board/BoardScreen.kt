@@ -1132,53 +1132,23 @@ fun BoardScreen(
                     Column(modifier = Modifier.fillMaxWidth()) {
                     TopAppBar(
                 title = {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .weight(1f, fill = false)
-                                .clickable { showBoardsList = !showBoardsList }
-                                .padding(end = 2.dp)
-                        ) {
-                            Text(
-                                text = board?.name?.let { s.localized(it) } ?: s.board,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier
-                                    .weight(1f, fill = false)
-                                    .basicMarquee(
-                                        iterations = Int.MAX_VALUE,
-                                        initialDelayMillis = 1200,
-                                        delayMillis = 1500
-                                    )
+                    Text(
+                        text = board?.name?.let { s.localized(it) } ?: s.board,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .pointerInput(Unit) {
+                                detectTapGestures(
+                                    onDoubleTap = { onBack() }
+                                )
+                            }
+                            .basicMarquee(
+                                iterations = Int.MAX_VALUE,
+                                initialDelayMillis = 1200,
+                                delayMillis = 1500
                             )
-                            Icon(
-                                imageVector = if (showBoardsList) {
-                                    Icons.Default.KeyboardArrowUp
-                                } else {
-                                    Icons.Default.KeyboardArrowDown
-                                },
-                                contentDescription = if (showBoardsList) s.hideBoardsList else s.showBoardsList,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
-                        IconButton(
-                            onClick = onBack,
-                            modifier = Modifier.size(40.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.GridView,
-                                contentDescription = s.projects,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
-                    }
+                    )
                 },
                 actions = {
                     IconButton(
