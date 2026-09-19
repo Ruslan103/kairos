@@ -104,7 +104,14 @@ class AppStrings(private val appLanguage: AppLanguage) {
     val email get() = t("Email", "Почта")
     val developer get() = t("Developer", "Разработчик")
     val developerHint get() = t("Questions and feedback", "Вопросы и обратная связь")
+    val developerName get() = t("Ruslan", "Руслан")
     val telegram get() = t("Telegram", "Telegram")
+    val developerEmailLabel get() = t("Email", "Почта")
+    val developerEmailValue get() = "JIuMaPk@gmail.ru"
+    val licenseNotice get() = t(
+        "Kairos © 2026 Ruslan. Distributed under the MIT License. The copyright notice must be preserved in all copies.",
+        "Kairos © 2026 Руслан. Распространяется по лицензии MIT. Уведомление об авторских правах должно сохраняться во всех копиях."
+    )
     val languageLabel get() = t("Language", "Язык")
     val settings get() = t("Settings", "Настройки")
     val appearance get() = t("Appearance", "Оформление")
