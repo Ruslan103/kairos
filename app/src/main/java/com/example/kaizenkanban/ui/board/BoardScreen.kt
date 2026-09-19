@@ -121,7 +121,6 @@ import com.example.kaizenkanban.ui.i18n.LocalAppStrings
 import com.example.kaizenkanban.ui.onboarding.PlanningGuideDialog
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -610,12 +609,18 @@ fun BoardScreen(
     val coroutineScope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
     val flingBehavior = rememberSnapFlingBehavior(lazyListState = lazyListState)
+    var currentColumnIndex by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(currentBoardId, columns.size) {
+        currentColumnIndex = 0.coerceIn(0, (columns.size - 1).coerceAtLeast(0))
+    }
 
     LaunchedEffect(currentBoardId, pendingHubColumnId, columns) {
         val hubId = pendingHubColumnId ?: return@LaunchedEffect
         val index = columns.indexOfFirst { it.id == hubId }
         if (index >= 0) {
             lazyListState.animateScrollToItem(index)
+            currentColumnIndex = index
             pendingHubColumnId = null
             return@LaunchedEffect
         }
@@ -641,21 +646,24 @@ fun BoardScreen(
             ?: lazyListState.firstVisibleItemIndex.coerceIn(0, (columns.size - 1).coerceAtLeast(0))
     }
 
-    var currentColumnIndex by remember { mutableIntStateOf(0) }
     LaunchedEffect(lazyListState, columns.size) {
-        snapshotFlow { lazyListState.isScrollInProgress to hubIndexNearCenter() }
-            .map { (scrolling, index) -> scrolling to index }
+        snapshotFlow { lazyListState.isScrollInProgress }
             .distinctUntilChanged()
-            .collect { (scrolling, index) ->
+            .collect { scrolling ->
                 if (!scrolling) {
-                    currentColumnIndex = index
+                    // Let snap fling finish before updating selection (avoids chip/layout jitter).
+                    delay(48)
+                    if (!lazyListState.isScrollInProgress) {
+                        currentColumnIndex = hubIndexNearCenter()
+                    }
                 }
             }
     }
 
     LaunchedEffect(currentColumnIndex, columns.size) {
         if (columns.isNotEmpty() && !lazyListState.isScrollInProgress) {
-            tabRowState.animateScrollToItem((currentColumnIndex - 1).coerceAtLeast(0))
+            // Instant tab align — animated tab scroll competed with hub snap.
+            tabRowState.scrollToItem((currentColumnIndex - 1).coerceAtLeast(0))
         }
     }
 
@@ -1541,62 +1549,6 @@ fun BoardScreen(
                     if (home.boardId == currentBoardId) null
                     else Triple(home.boardId, home.id, null to task.title)
                 }
-                if (focusJump != null) {
-                    val (targetBoardId, targetColumnId, scrollAndTitle) = focusJump
-                    val (scrollIndex, focusTitle) = scrollAndTitle
-                    Surface(
-                        onClick = {
-                            if (targetBoardId == currentBoardId && scrollIndex != null) {
-                                coroutineScope.launch {
-                                    lazyListState.animateScrollToItem(scrollIndex)
-                                }
-                            } else {
-                                openBoardAtHub(targetBoardId, targetColumnId)
-                            }
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 4.dp),
-                        shape = RoundedCornerShape(10.dp),
-                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f),
-                        border = androidx.compose.foundation.BorderStroke(
-                            1.dp,
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
-                        )
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Bolt,
-                                contentDescription = s.goToFocus,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Text(
-                                text = focusTitle,
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = FontWeight.SemiBold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f),
-                                color = MaterialTheme.colorScheme.onPrimaryContainer
-                            )
-                            Text(
-                                text = s.goToFocus,
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-                }
 
                 // Collapsible Column Switcher bar (chips toggled by "Хабы" in TopAppBar)
                 AnimatedVisibility(
@@ -1667,13 +1619,16 @@ fun BoardScreen(
                     }
                 }
 
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                ) {
                 LazyRow(
                     state = lazyListState,
                     flingBehavior = if (draggedTask != null) ScrollableDefaults.flingBehavior() else flingBehavior,
                     userScrollEnabled = draggedTask == null,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
+                    modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(
                         top = if (showTopBar) 16.dp else 4.dp,
                         bottom = 16.dp
@@ -1686,9 +1641,8 @@ fun BoardScreen(
                         val nextColumn = if (index < columns.size - 1) columns[index + 1] else null
 
                         Box(
-                            modifier = Modifier
-                                .fillParentMaxWidth()
-                                .padding(horizontal = 16.dp)
+                            modifier = Modifier.fillParentMaxWidth(),
+                            contentAlignment = Alignment.TopCenter
                         ) {
                         ColumnItem(
                             column = column,
@@ -1827,9 +1781,8 @@ fun BoardScreen(
                     
                     item {
                         Box(
-                            modifier = Modifier
-                                .fillParentMaxWidth()
-                                .padding(horizontal = 16.dp)
+                            modifier = Modifier.fillParentMaxWidth(),
+                            contentAlignment = Alignment.TopCenter
                         ) {
                         OutlinedButton(
                             onClick = { isAddingColumn = true },
@@ -1854,6 +1807,68 @@ fun BoardScreen(
                         }
                         }
                     }
+                }
+
+                if (focusJump != null) {
+                    val (targetBoardId, targetColumnId, scrollAndTitle) = focusJump
+                    val (scrollIndex, focusTitle) = scrollAndTitle
+                    // Overlay — must not change LazyRow height when hub selection settles (that caused swipe jitter).
+                    Surface(
+                        onClick = {
+                            if (targetBoardId == currentBoardId && scrollIndex != null) {
+                                coroutineScope.launch {
+                                    lazyListState.animateScrollToItem(scrollIndex)
+                                }
+                            } else {
+                                openBoardAtHub(targetBoardId, targetColumnId)
+                            }
+                        },
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp)
+                            .zIndex(2f),
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.92f),
+                        border = androidx.compose.foundation.BorderStroke(
+                            1.dp,
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
+                        ),
+                        shadowElevation = 4.dp
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Bolt,
+                                contentDescription = s.goToFocus,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text(
+                                text = focusTitle,
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                            Text(
+                                text = s.goToFocus,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
                 }
             }
 

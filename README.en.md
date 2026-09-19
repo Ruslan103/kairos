@@ -14,7 +14,7 @@
 **Kairos** is a modern Android app for strategic and day-to-day life planning, combining **OKR**, the **Eisenhower Matrix**, and **chunking / focus**.
 
 It connects long-term goals with today’s actions:
-- **OKR board:** Today → Soon → Ongoing → Dream.
+- **OKR board:** Today → Soon → Ongoing → Main Goal.
 - **Eisenhower Matrix board:** four quadrants (Urgent & important, Important not urgent, Urgent not important, Not urgent & not important).
 - **One-tap task mirroring:** the same card can live in your plan and in the day’s priority matrix.
 - **Fast board switcher:** jump between OKR and the matrix in one tap at the top of the screen.
@@ -34,11 +34,11 @@ It connects long-term goals with today’s actions:
 ## Features
 
 ### 1. Two-level planning (OKR + Eisenhower Matrix)
-- **OKR board (from step to dream):**
+- **OKR board (from step to main goal):**
   - *Today* — one concrete step for this day
   - *Soon* — the next few days / week
   - *Ongoing* — habits and practices you keep
-  - *Dream* — the bigger picture this is all for
+  - *Main Goal* — the bigger picture this is all for
 - **Eisenhower board (daily priority filter):**
   - *Urgent and important (Q1)* — deadlines and crises
   - *Important, not urgent (Q2)* — growth, health, strategy (key focus)

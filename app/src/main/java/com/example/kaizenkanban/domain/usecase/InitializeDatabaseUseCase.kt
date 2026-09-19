@@ -52,7 +52,7 @@ class InitializeDatabaseUseCase(
                 .trim()
 
         // 1. OKR Board setup (clean typography, no emojis)
-        val okrHubTitles = listOf("Сегодня", "Скоро", "Постоянно", "Мечта")
+        val okrHubTitles = listOf("Сегодня", "Скоро", "Постоянно", "Главная цель")
         var okrBoard = findOkrBoard(allBoards, allColumns)
         if (okrBoard == null) {
             repository.clearDefaultBoards()
@@ -232,7 +232,7 @@ class InitializeDatabaseUseCase(
 
     /**
      * Canonical OKR hub titles (stored in Russian; [AppStrings.localized] maps for EN UI).
-     * Legacy: Действия / Спринты / Метрики / Главная цель (and EN equivalents).
+     * Legacy: Действия / Спринты / Метрики / Мечта / Dream (and EN equivalents).
      */
     private fun mapOkrHubTitle(title: String): String? {
         val t = title.trim()
@@ -250,7 +250,7 @@ class InitializeDatabaseUseCase(
 
             lower == "мечта" || lower == "dream" ||
                 lower.contains("главная цель") || lower.contains("стратег") ||
-                lower == "main goal" -> "Мечта"
+                lower == "main goal" -> "Главная цель"
 
             else -> null
         }
@@ -331,10 +331,10 @@ class InitializeDatabaseUseCase(
             clean == "мечта" || clean == "dream" ||
                 clean.contains("главная цель") || clean.contains("стратег") || clean == "main goal" ->
                 rule(
-                    "Rules for Dream:\n" +
+                    "Rules for Main Goal:\n" +
                         "• The big picture you are moving toward: e.g. “A fit body”.\n" +
                         "• Everything to the left is how you get there.",
-                    "Правила для хаба «Мечта»:\n" +
+                    "Правила для хаба «Главная цель»:\n" +
                         "• Большая картина, к которой идёте: например «Накаченное тело».\n" +
                         "• Всё слева — как вы к ней приходите."
                 )
