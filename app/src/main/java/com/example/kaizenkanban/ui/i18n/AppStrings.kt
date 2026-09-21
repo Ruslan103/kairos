@@ -186,6 +186,7 @@ class AppStrings(private val appLanguage: AppLanguage) {
     val hideMenu get() = t("Hide menu", "Скрыть меню")
     val moreActions get() = t("More", "Ещё")
     val showMenu get() = t("Show menu", "Показать меню")
+    val pullDownForMenu get() = t("Pull down for menu", "Потяните вниз — меню")
     val projects get() = t("Projects", "Проекты")
     val setPrimaryHub get() = t("Set as primary hub", "Сделать основным хабом")
     val primaryHub get() = t("Primary hub", "Основной хаб")

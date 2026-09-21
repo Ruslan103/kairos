@@ -15,6 +15,9 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.IntSize
@@ -96,14 +99,20 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
@@ -619,6 +628,8 @@ fun BoardScreen(
     var showColumnHeaders by rememberSaveable { mutableStateOf(false) }
     var showBoardsList by rememberSaveable { mutableStateOf(false) }
     var showTopBar by rememberSaveable { mutableStateOf(true) }
+    /** Telegram-archive style: pull-down peek of board chrome while top bar is hidden (px). */
+    var chromePullPx by remember { mutableFloatStateOf(0f) }
     var topBarMenuExpanded by remember { mutableStateOf(false) }
     val compactWidth = windowSizeClass == WindowWidthSizeClass.Compact
     var taskForComments by remember { mutableStateOf<Task?>(null) }
@@ -810,6 +821,16 @@ fun BoardScreen(
     // scroll stops — so the open hub keeps its buttons for the whole swipe (cheap enough;
     // the FPS win is lite neighbors + deferred settle, not stripping the current page).
     var hubSettledVirtual by remember { mutableIntStateOf(0) }
+    /** Pull-down grabber appears with task action buttons after hub settle — not mid-swipe. */
+    var hubGrabberVisible by remember { mutableStateOf(true) }
+
+    LaunchedEffect(lazyListState) {
+        snapshotFlow { lazyListState.isScrollInProgress }
+            .distinctUntilChanged()
+            .collect { scrolling ->
+                if (scrolling) hubGrabberVisible = false
+            }
+    }
 
     LaunchedEffect(lazyListState, hubPagerCount) {
         snapshotFlow {
@@ -821,10 +842,14 @@ fun BoardScreen(
         }
             .distinctUntilChanged()
             .collectLatest { (scrolling, dragging, center) ->
-                if (dragging || scrolling) return@collectLatest
+                if (dragging || scrolling) {
+                    hubGrabberVisible = false
+                    return@collectLatest
+                }
                 // Wait for soft snap ease to finish before swapping lite→full.
                 kotlinx.coroutines.delay(200)
                 hubSettledVirtual = center
+                hubGrabberVisible = !isAddHubVirtual(center)
                 if (!isAddHubVirtual(center)) {
                     val real = virtualToReal(center)
                     if (real != currentColumnIndex) currentColumnIndex = real
@@ -1244,22 +1269,86 @@ fun BoardScreen(
         }
     }
 
+    fun hideBoardChrome() {
+        showTopBar = false
+        showBoardsList = false
+        showColumnHeaders = false
+        boardSearchOpen = false
+        chromePullPx = 0f
+        topBarMenuExpanded = false
+    }
+
+    val boardChromeMaxPx = WindowInsets.statusBars.getTop(density).toFloat() +
+        with(density) { BoardTopBarContentHeight.toPx() }
+
+    fun settleChromePull() {
+        coroutineScope.launch {
+            val threshold = boardChromeMaxPx * 0.42f
+            if (chromePullPx >= threshold) {
+                showTopBar = true
+                chromePullPx = 0f
+            } else if (chromePullPx > 0f) {
+                val anim = Animatable(chromePullPx)
+                anim.animateTo(
+                    0f,
+                    animationSpec = spring(dampingRatio = 0.86f, stiffness = 420f)
+                ) {
+                    chromePullPx = value
+                }
+            }
+        }
+    }
+
     Scaffold(
         topBar = {
-                AnimatedVisibility(
-                    visible = showTopBar,
-                    enter = expandVertically(animationSpec = tween(80)) + fadeIn(animationSpec = tween(70)),
-                    exit = shrinkVertically(animationSpec = tween(70)) + fadeOut(animationSpec = tween(60))
-                ) {
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                    TopAppBar(
-                title = {
+                val peekProgress =
+                    if (showTopBar) 1f else (chromePullPx / boardChromeMaxPx.coerceAtLeast(1f)).coerceIn(0f, 1f)
+                if (peekProgress > 0.001f) {
+                    val peekClipHeight = with(density) { (boardChromeMaxPx * peekProgress).toDp() }
+                    Box(
+                        modifier = if (showTopBar) {
+                            Modifier.fillMaxWidth()
+                        } else {
+                            Modifier
+                                .fillMaxWidth()
+                                .height(peekClipHeight)
+                                .clipToBounds()
+                        }
+                    ) {
+                    Column(
+                        modifier = if (showTopBar) {
+                            Modifier.fillMaxWidth()
+                        } else {
+                            Modifier
+                                .align(Alignment.BottomStart)
+                                .fillMaxWidth()
+                        }
+                    ) {
+                    // Compact board chrome (shorter than default 64.dp TopAppBar).
+                    Surface(
+                        color = MaterialTheme.colorScheme.background,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .windowInsetsPadding(WindowInsets.statusBars)
+                                .height(BoardTopBarContentHeight)
+                                .padding(start = 12.dp, end = AlignedMoreEdgeGutter),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                     Text(
                         text = board?.name?.let { s.localized(it) } ?: s.board,
-                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleLarge.copy(
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 22.sp,
+                            lineHeight = 26.sp
+                        ),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
+                        color = MaterialTheme.colorScheme.onBackground,
                         modifier = Modifier
+                            .weight(1f)
                             .pointerInput(Unit) {
                                 detectTapGestures(
                                     onDoubleTap = { onBack() }
@@ -1271,8 +1360,6 @@ fun BoardScreen(
                                 delayMillis = 1500
                             )
                     )
-                },
-                actions = {
                     IconButton(
                         onClick = {
                             boardSearchOpen = !boardSearchOpen
@@ -1281,7 +1368,7 @@ fun BoardScreen(
                                 keyboardController?.hide()
                             }
                         },
-                        modifier = Modifier.size(40.dp)
+                        modifier = Modifier.size(BoardTopBarActionSize)
                     ) {
                         Icon(
                             imageVector = if (boardSearchOpen) Icons.Default.Close else Icons.Default.Search,
@@ -1291,56 +1378,52 @@ fun BoardScreen(
                             } else {
                                 MaterialTheme.colorScheme.onSurfaceVariant
                             },
-                            modifier = Modifier.size(22.dp)
+                            modifier = Modifier.size(20.dp)
                         )
                     }
                     if (!compactWidth) {
                         IconButton(
                             onClick = { showReorderColumnsDialog = true },
-                            modifier = Modifier.size(40.dp)
+                            modifier = Modifier.size(BoardTopBarActionSize)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.SwapHoriz,
                                 contentDescription = s.hubOrder,
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(24.dp)
+                                modifier = Modifier.size(22.dp)
                             )
                         }
                         IconButton(
                             onClick = onNavigateToCalendar,
-                            modifier = Modifier.size(40.dp)
+                            modifier = Modifier.size(BoardTopBarActionSize)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.DateRange,
                                 contentDescription = s.calendar,
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(22.dp)
+                                modifier = Modifier.size(20.dp)
                             )
                         }
                         IconButton(
                             onClick = { showManageCategories = true },
-                            modifier = Modifier.size(40.dp)
+                            modifier = Modifier.size(BoardTopBarActionSize)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Label,
                                 contentDescription = s.manageStatuses,
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(22.dp)
+                                modifier = Modifier.size(20.dp)
                             )
                         }
                         IconButton(
-                            onClick = {
-                                showTopBar = false
-                                showBoardsList = false
-                                showColumnHeaders = false
-                            },
-                            modifier = Modifier.size(40.dp)
+                            onClick = { hideBoardChrome() },
+                            modifier = Modifier.size(BoardTopBarActionSize)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.KeyboardArrowUp,
                                 contentDescription = s.hideMenu,
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(22.dp)
+                                modifier = Modifier.size(20.dp)
                             )
                         }
                     }
@@ -1532,21 +1615,15 @@ fun BoardScreen(
                                     text = { Text(s.hideMenu) },
                                     onClick = {
                                         topBarMenuExpanded = false
-                                        showTopBar = false
-                                        showBoardsList = false
-                                        showColumnHeaders = false
+                                        hideBoardChrome()
                                     },
                                     leadingIcon = { Icon(Icons.Default.KeyboardArrowUp, contentDescription = null) }
                                 )
                             }
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
-                    titleContentColor = MaterialTheme.colorScheme.onBackground,
-                    navigationIconContentColor = MaterialTheme.colorScheme.onBackground
-                )
-            )
+                    } // AlignedMoreMenuButton
+                        } // Row
+                    } // Surface
+                    if (showTopBar) {
                     AnimatedVisibility(
                         visible = boardSearchOpen,
                         enter = expandVertically(animationSpec = tween(120)) + fadeIn(animationSpec = tween(100)),
@@ -1585,8 +1662,10 @@ fun BoardScreen(
                             }
                         }
                     }
-                    }
-                }
+                    } // if showTopBar (search)
+                    } // Column chrome
+                    } // Box peek/clip
+                } // if peekProgress
         },
         floatingActionButton = {
             if (draggedTask == null && columns.isNotEmpty()) {
@@ -2033,6 +2112,7 @@ fun BoardScreen(
                                 taskForMoveHubId = column.id
                             },
                             draggedTaskId = draggedTask?.id,
+                            chromePullEnabled = draggedTask == null,
                             dropPreviewState = dropPreviewState,
                             observeDropPreview = !useLiteCards,
                             reportPositions = draggedTask != null && !useLiteCards,
@@ -2045,6 +2125,46 @@ fun BoardScreen(
                                 hubListBounds[column.id] = rect
                             },
                             onToggleCompleted = { completeTaskWithUndo(it) },
+                            immersiveChrome = !showTopBar && chromePullPx <= 0.5f,
+                            onHubTitleDoubleTap = {
+                                if (showTopBar) hideBoardChrome() else {
+                                    showTopBar = true
+                                    chromePullPx = 0f
+                                }
+                            },
+                            boardChromeExpanded = showTopBar,
+                            onChromePullDelta = { dy ->
+                                if (!showTopBar) {
+                                    val room = (boardChromeMaxPx * 1.15f - chromePullPx).coerceAtLeast(0f)
+                                    val damped = dy * (
+                                        0.55f + 0.45f * (room / (boardChromeMaxPx * 1.15f)).coerceIn(0f, 1f)
+                                    )
+                                    chromePullPx =
+                                        (chromePullPx + damped).coerceIn(0f, boardChromeMaxPx * 1.15f)
+                                }
+                            },
+                            onChromePullEnd = { settleChromePull() },
+                            onChromeCollapseDelta = { dy ->
+                                when {
+                                    dy >= 0f -> 0f
+                                    showTopBar -> {
+                                        showTopBar = false
+                                        boardSearchOpen = false
+                                        showBoardsList = false
+                                        showColumnHeaders = false
+                                        chromePullPx =
+                                            (boardChromeMaxPx + dy).coerceIn(0f, boardChromeMaxPx)
+                                        dy
+                                    }
+                                    chromePullPx <= 0f -> 0f
+                                    else -> {
+                                        val next = (chromePullPx + dy).coerceAtLeast(0f)
+                                        val consumed = next - chromePullPx
+                                        chromePullPx = next
+                                        consumed
+                                    }
+                                }
+                            },
                             viewModel = viewModel
                         )
                         }
@@ -3055,18 +3175,33 @@ fun BoardScreen(
                 }
             }
 
-            if (!showTopBar) {
+            AnimatedVisibility(
+                visible = !showTopBar && chromePullPx <= 0.5f && hubGrabberVisible,
+                enter = fadeIn(animationSpec = tween(400, easing = FastOutSlowInEasing)) +
+                    expandVertically(animationSpec = tween(400, easing = FastOutSlowInEasing)),
+                exit = fadeOut(animationSpec = tween(90)) +
+                    shrinkVertically(animationSpec = tween(90)),
+                modifier = Modifier.align(Alignment.TopCenter)
+            ) {
                 Box(
                     modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .clickable { showTopBar = true }
-                        .padding(horizontal = 24.dp, vertical = 2.dp)
+                        .clickable {
+                            showTopBar = true
+                            chromePullPx = 0f
+                        }
+                        .padding(top = 8.dp, bottom = 4.dp, start = 32.dp, end = 32.dp)
+                        .semantics { contentDescription = s.pullDownForMenu },
+                    contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.KeyboardArrowDown,
-                        contentDescription = s.showMenu,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
-                        modifier = Modifier.size(20.dp)
+                    // Sheet-style grabber (Telegram / Material bottom sheet).
+                    Box(
+                        modifier = Modifier
+                            .width(40.dp)
+                            .height(4.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(
+                                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+                            )
                     )
                 }
             }
@@ -3211,6 +3346,7 @@ fun ManageCategoriesDialog(
     )
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ColumnItem(
     column: Column,
@@ -3237,6 +3373,8 @@ private fun ColumnItem(
     columnCommentsCount: Int = 0,
     onCommentColumnClick: () -> Unit = {},
     draggedTaskId: String? = null,
+    /** False while a task is being dragged — chrome pull must not steal the gesture. */
+    chromePullEnabled: Boolean = true,
     dropPreviewState: State<TaskDropPreview?>,
     observeDropPreview: Boolean = true,
     reportPositions: Boolean = false,
@@ -3245,6 +3383,14 @@ private fun ColumnItem(
     onHubScrollState: (androidx.compose.foundation.lazy.LazyListState) -> Unit = {},
     onHubListPositioned: (androidx.compose.ui.geometry.Rect) -> Unit = {},
     onToggleCompleted: (Task) -> Unit = {},
+    /** Board chrome hidden — use a shorter hub title strip. */
+    immersiveChrome: Boolean = false,
+    onHubTitleDoubleTap: () -> Unit = {},
+    boardChromeExpanded: Boolean = true,
+    onChromePullDelta: (Float) -> Unit = {},
+    onChromePullEnd: () -> Unit = {},
+    /** Collapse expanded/peeking chrome; return consumed vertical px (negative dy). */
+    onChromeCollapseDelta: (Float) -> Float = { 0f },
     viewModel: SharedViewModel
 ) {
     val context = LocalContext.current
@@ -3277,6 +3423,69 @@ private fun ColumnItem(
     val hubListState = rememberLazyListState()
     LaunchedEffect(hubListState) {
         onHubScrollState(hubListState)
+    }
+    // Telegram-archive pull: vertical-only nested scroll on the task list — never touches hub LazyRow.
+    // Disabled while dragging a task so the board chrome does not collapse under the finger.
+    val chromePullConnection = remember(
+        hubListState,
+        useLiteCards,
+        chromePullEnabled,
+        boardChromeExpanded,
+        onChromePullDelta,
+        onChromePullEnd,
+        onChromeCollapseDelta
+    ) {
+        object : NestedScrollConnection {
+            private fun atListTop(): Boolean =
+                hubListState.firstVisibleItemIndex == 0 &&
+                    hubListState.firstVisibleItemScrollOffset == 0
+
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (!chromePullEnabled || useLiteCards || available.y >= 0f) return Offset.Zero
+                // Finger moving up / content scrolling down → collapse chrome first (vertical only).
+                if (boardChromeExpanded) {
+                    if (!atListTop()) return Offset.Zero
+                    val consumedY = onChromeCollapseDelta(available.y)
+                    return if (consumedY != 0f) Offset(0f, consumedY) else Offset.Zero
+                }
+                val consumedY = onChromeCollapseDelta(available.y)
+                return if (consumedY != 0f) Offset(0f, consumedY) else Offset.Zero
+            }
+
+            override fun onPostScroll(
+                consumed: Offset,
+                available: Offset,
+                source: NestedScrollSource
+            ): Offset {
+                if (!chromePullEnabled || useLiteCards || available.y <= 0f || !atListTop()) {
+                    return Offset.Zero
+                }
+                // Overscroll at top while chrome hidden → peek like Telegram Archive.
+                if (!boardChromeExpanded) {
+                    onChromePullDelta(available.y)
+                    return Offset(0f, available.y)
+                }
+                return Offset.Zero
+            }
+
+            override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
+                if (chromePullEnabled && !useLiteCards && !boardChromeExpanded) {
+                    onChromePullEnd()
+                }
+                // Do not consume fling velocity (esp. horizontal hub paging).
+                return Velocity.Zero
+            }
+        }
+    }
+    LaunchedEffect(hubListState.isScrollInProgress, useLiteCards, boardChromeExpanded, chromePullEnabled) {
+        if (
+            chromePullEnabled &&
+            !hubListState.isScrollInProgress &&
+            !useLiteCards &&
+            !boardChromeExpanded
+        ) {
+            onChromePullEnd()
+        }
     }
     var hubMenuExpanded by remember { mutableStateOf(false) }
     // Non-Compose counter: bump while lite without recomposing the hub list mid-swipe.
@@ -3327,13 +3536,17 @@ private fun ColumnItem(
                     Modifier
                 }
             )
-            .padding(horizontal = 0.dp, vertical = 12.dp)
+            .padding(
+                horizontal = 0.dp,
+                vertical = if (immersiveChrome) 2.dp else 4.dp
+            )
     ) {
         // Hub header: menu for actions (no pull gestures — keeps hub paging smooth)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(bottom = 8.dp)
+                .height(HubTitleStripHeight)
+                .padding(bottom = if (immersiveChrome) 0.dp else 2.dp)
                 // end gutter matches TopAppBar actions end padding (4.dp) so ⋮ stacks vertically
                 .padding(start = 8.dp, end = 0.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -3341,31 +3554,38 @@ private fun ColumnItem(
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.weight(1f)
+                modifier = Modifier
+                    .weight(1f)
+                    .pointerInput(column.id) {
+                        detectTapGestures(onDoubleTap = { onHubTitleDoubleTap() })
+                    }
             ) {
                 Box(
                     modifier = Modifier
-                        .size(width = 4.dp, height = 20.dp)
+                        .size(width = 3.dp, height = 20.dp)
                         .clip(RoundedCornerShape(2.dp))
                         .background(hubColor)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
                     text = s.localized(column.title),
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.titleLarge.copy(
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 22.sp,
+                        lineHeight = 26.sp
+                    ),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
                 )
             }
-            if (hiddenCount > 0) {
+                    if (hiddenCount > 0) {
                 Box(
                     modifier = Modifier
                         .padding(end = 2.dp)
-                        .size(36.dp)
-                        .clip(RoundedCornerShape(10.dp))
+                        .size(32.dp)
+                        .clip(RoundedCornerShape(8.dp))
                         .background(
                             if (showHiddenTasks) MaterialTheme.colorScheme.primary
                             else MaterialTheme.colorScheme.secondaryContainer
@@ -3458,9 +3678,10 @@ private fun ColumnItem(
         }
         LazyColumn(
             state = hubListState,
-            userScrollEnabled = !useLiteCards,
+            userScrollEnabled = !useLiteCards && draggedTaskId == null,
             modifier = Modifier
                 .fillMaxHeight()
+                .nestedScroll(chromePullConnection)
                 .then(
                     if (reportPositions) {
                         Modifier.onGloballyPositioned { coordinates ->
@@ -3886,7 +4107,7 @@ fun TaskCard(
             .then(
                 if (compactEisenhower) {
                     Modifier
-                        .clip(RoundedCornerShape(12.dp))
+                        .clip(TaskBubbleShape)
                         .background(eisenhowerGradient(task.eisenhowerQuadrant))
                 } else Modifier
             ),
@@ -3909,7 +4130,7 @@ fun TaskCard(
             else ->
                 androidx.compose.foundation.BorderStroke(1.2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f))
         },
-        shape = RoundedCornerShape(12.dp)
+        shape = TaskBubbleShape
     ) {
         Column(
             modifier = Modifier
@@ -5201,10 +5422,15 @@ private class EndAlignedMenuPositionProvider(
     }
 }
 
+/** Compact board title row (was Material TopAppBar ~64.dp). */
+private val BoardTopBarContentHeight = 48.dp
+private val BoardTopBarActionSize = 40.dp
+/** Hub title row — fits Manrope 22sp + ⋮ without growing the chrome tall. */
+private val HubTitleStripHeight = 44.dp
 /** Matches Material3 TopAppBar actions end padding and hub page side inset. */
 private val AlignedMoreEdgeGutter = 4.dp
-private val AlignedMoreButtonSize = 48.dp
-private val AlignedMoreIconSize = 26.dp
+private val AlignedMoreButtonSize = 40.dp
+private val AlignedMoreIconSize = 22.dp
 private val AlignedMoreMenuWidth = 280.dp
 private val AlignedMoreMenuGap = 0.dp
 /** Task card quick-actions (bolt / check) — Material min touch target. */
@@ -5213,6 +5439,13 @@ private val TaskActionIconSize = 26.dp
 private val TaskActionsClusterGap = 4.dp
 /** Always reserved for bolt+check so title width matches lite peek and settle fade. */
 private val TaskActionsClusterWidth = TaskActionButtonSize * 2 + TaskActionsClusterGap
+/** Outgoing chat-bubble frame for tasks (tail on the bottom-end). */
+private val TaskBubbleShape = RoundedCornerShape(
+    topStart = 20.dp,
+    topEnd = 20.dp,
+    bottomStart = 20.dp,
+    bottomEnd = 3.dp
+)
 /** Gap between title / actions / ⋮ in TaskCard Row (Arrangement.spacedBy). */
 private val TaskRowTrailingGap = 6.dp
 /** Due / related bottom meta strip height (fits link badge + labelSmall). */
@@ -5289,7 +5522,7 @@ private fun LiteTaskRow(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .clip(TaskBubbleShape)
             .then(
                 if (painted) Modifier.background(eisenhowerGradient(eisenhowerQuadrant))
                 else Modifier.background(
@@ -5300,7 +5533,7 @@ private fun LiteTaskRow(
             .border(
                 width = if (isInProgress) 2.dp else 1.2.dp,
                 color = borderColor,
-                shape = RoundedCornerShape(12.dp)
+                shape = TaskBubbleShape
             )
             .then(
                 if (painted) Modifier.background(Color.Black.copy(alpha = 0.18f))
@@ -5365,7 +5598,7 @@ private fun DragGhostCard(
         modifier = modifier.then(
             if (painted) {
                 Modifier
-                    .clip(RoundedCornerShape(12.dp))
+                    .clip(TaskBubbleShape)
                     .background(eisenhowerGradient(eisenhowerQuadrant))
             } else Modifier
         ),
@@ -5382,7 +5615,7 @@ private fun DragGhostCard(
             if (painted) Color.White.copy(alpha = 0.28f)
             else MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)
         ),
-        shape = RoundedCornerShape(12.dp)
+        shape = TaskBubbleShape
     ) {
         Text(
             text = title,
