@@ -10,6 +10,7 @@ import com.example.kaizenkanban.domain.repository.KanbanRepository
 import com.example.kaizenkanban.domain.usecase.*
 import com.example.kaizenkanban.ui.i18n.KanbanNames
 import android.net.Uri
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -227,7 +228,7 @@ class SharedViewModel(
     }
 
     init {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.Default) {
             try {
                 initializeDatabaseUseCase()
             } catch (e: Exception) {

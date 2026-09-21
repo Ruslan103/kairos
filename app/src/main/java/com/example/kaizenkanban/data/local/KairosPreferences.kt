@@ -13,10 +13,6 @@ class KairosPreferences(context: Context) {
         get() = prefs.getBoolean(KEY_ENTER_ADDS_TASK, true)
         set(value) = prefs.edit().putBoolean(KEY_ENTER_ADDS_TASK, value).apply()
 
-    var isExecutionMode: Boolean
-        get() = prefs.getBoolean(KEY_EXECUTION_MODE, true)
-        set(value) = prefs.edit().putBoolean(KEY_EXECUTION_MODE, value).apply()
-
     var inProgressTaskId: String?
         get() = prefs.getString(KEY_IN_PROGRESS_TASK, null)?.takeIf { it.isNotBlank() }
         set(value) {
@@ -124,13 +120,20 @@ class KairosPreferences(context: Context) {
         prefs.edit().putString(primaryHubKey(boardId), columnId.orEmpty()).apply()
     }
 
+    /**
+     * Bump when [InitializeDatabaseUseCase] seed/migration logic changes so warm
+     * starts re-run the full path once, then skip expensive scans again.
+     */
+    var dbSeedVersion: Int
+        get() = prefs.getInt(KEY_DB_SEED_VERSION, 0)
+        set(value) = prefs.edit().putInt(KEY_DB_SEED_VERSION, value).apply()
+
     private fun primaryHubKey(boardId: String) = "$KEY_PRIMARY_HUB_PREFIX$boardId"
 
     private companion object {
         const val PREFS_NAME = "kairos_prefs"
         const val KEY_LANGUAGE = "app_language"
         const val KEY_ENTER_ADDS_TASK = "enter_adds_task"
-        const val KEY_EXECUTION_MODE = "execution_mode"
         const val KEY_IN_PROGRESS_TASK = "in_progress_task_id"
         const val KEY_REMINDER_TASKS = "reminder_task_ids"
         const val KEY_REMINDER_HOUR = "reminder_hour"
@@ -147,5 +150,6 @@ class KairosPreferences(context: Context) {
         const val KEY_OKR_BOARD_ID = "okr_board_id"
         const val KEY_EISENHOWER_BOARD_ID = "eisenhower_board_id"
         const val KEY_PRIMARY_HUB_PREFIX = "primary_hub_"
+        const val KEY_DB_SEED_VERSION = "db_seed_version"
     }
 }

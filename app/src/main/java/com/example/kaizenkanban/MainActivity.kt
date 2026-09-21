@@ -32,9 +32,14 @@ import com.example.kaizenkanban.ui.theme.resolveDarkTheme
 import com.example.kaizenkanban.ui.viewmodel.SharedViewModel
 import com.example.kaizenkanban.ui.viewmodel.SharedViewModelFactory
 import com.example.kaizenkanban.widget.KairosWidgetUpdater
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlin.time.Duration.Companion.milliseconds
 
 class MainActivity : ComponentActivity() {
 
@@ -95,8 +100,19 @@ class MainActivity : ComponentActivity() {
         viewModel = ViewModelProvider(this, factory)[SharedViewModel::class.java]
 
         intent?.let { handleIncomingIntent(it) }
-        DueReminderScheduler.ensureChannel(this)
-        maybeRequestNotificationPermission()
+
+        lifecycleScope.launch(Dispatchers.Default) {
+            DueReminderScheduler.ensureChannel(this@MainActivity)
+        }
+
+        lifecycleScope.launch {
+            viewModel.state
+                .map { it.isInitialized }
+                .first { it }
+            // Let the first board frame paint before the permission dialog.
+            delay(600.milliseconds)
+            maybeRequestNotificationPermission()
+        }
 
         lifecycleScope.launch {
             viewModel.state
@@ -104,8 +120,12 @@ class MainActivity : ComponentActivity() {
                 .distinctUntilChanged()
                 .collect { (initialized, tasks) ->
                     if (initialized) {
-                        DueReminderScheduler.sync(this@MainActivity, tasks)
-                        KairosWidgetUpdater.updateAll(this@MainActivity, tasks)
+                        // Yield so Compose can draw the board before alarm/widget work.
+                        delay(1)
+                        withContext(Dispatchers.IO) {
+                            DueReminderScheduler.sync(this@MainActivity, tasks)
+                            KairosWidgetUpdater.updateAll(this@MainActivity, tasks)
+                        }
                     }
                 }
         }

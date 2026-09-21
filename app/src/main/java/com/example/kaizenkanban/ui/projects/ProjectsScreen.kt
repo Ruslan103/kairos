@@ -76,6 +76,7 @@ import kotlin.math.roundToInt
 import androidx.core.content.FileProvider
 import com.example.kaizenkanban.data.transfer.KairosTransferHelper
 import com.example.kaizenkanban.data.local.KairosPreferences
+import com.example.kaizenkanban.widget.KairosWidgetUpdater
 import com.example.kaizenkanban.domain.model.Board
 import com.example.kaizenkanban.domain.model.BoardTemplate
 import com.example.kaizenkanban.domain.model.Column
@@ -202,6 +203,7 @@ fun ProjectsScreen(
                 if (focusTaskId == task.id) {
                     focusTaskId = null
                     kairosPrefs.inProgressTaskId = null
+                    KairosWidgetUpdater.updateAll(context, state.tasks)
                 }
                 val result = snackbarHostState.showSnackbar(
                     message = s.taskMarkedDone,
@@ -740,6 +742,7 @@ fun ProjectsScreen(
                             TextButton(onClick = {
                                 focusTaskId = null
                                 kairosPrefs.inProgressTaskId = null
+                                KairosWidgetUpdater.updateAll(context, state.tasks)
                             }) {
                                 Text(s.clearFocus, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }

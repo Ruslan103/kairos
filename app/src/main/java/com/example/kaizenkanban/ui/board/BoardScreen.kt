@@ -5,19 +5,28 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupPositionProvider
+import androidx.compose.ui.window.PopupProperties
 import kotlin.math.abs
 import kotlin.math.roundToInt
-import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
+import androidx.compose.foundation.gestures.snapping.SnapFlingBehavior
+import androidx.compose.foundation.gestures.snapping.SnapLayoutInfoProvider
+import androidx.compose.foundation.gestures.snapping.SnapPositionInLayout
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -49,10 +58,15 @@ import androidx.compose.material.icons.filled.LinkOff
 import com.example.kaizenkanban.domain.model.Eisenhower
 import com.example.kaizenkanban.domain.model.TaskRepeat
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.rememberSplineBasedDecay
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
@@ -68,7 +82,6 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.filled.ViewAgenda
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
@@ -113,6 +126,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import com.example.kaizenkanban.data.local.KairosPreferences
+import com.example.kaizenkanban.widget.KairosWidgetUpdater
 import com.example.kaizenkanban.reminders.DueReminderScheduler
 import com.example.kaizenkanban.ui.calendar.DueDateQuickPick
 import com.example.kaizenkanban.ui.calendar.isDueToday
@@ -125,9 +139,11 @@ import com.example.kaizenkanban.ui.i18n.LocalAppLanguage
 import com.example.kaizenkanban.ui.i18n.LocalAppStrings
 import com.example.kaizenkanban.ui.onboarding.PlanningGuideDialog
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import androidx.compose.runtime.snapshotFlow
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -142,7 +158,6 @@ import com.example.kaizenkanban.domain.model.Project
 import com.example.kaizenkanban.ui.theme.eisenhowerGradient
 import com.example.kaizenkanban.ui.theme.eisenhowerOnColor
 import com.example.kaizenkanban.ui.theme.eisenhowerSolid
-import com.example.kaizenkanban.ui.theme.modeSwitchGradient
 import com.example.kaizenkanban.ui.theme.getStatusBrush
 import com.example.kaizenkanban.ui.theme.deleteButtonGradient
 import com.example.kaizenkanban.ui.theme.deleteButtonColor
@@ -263,11 +278,12 @@ private fun RelatedBoardsButton(
     if (links.isEmpty()) return
     val s = LocalAppStrings.current
     var expanded by remember { mutableStateOf(false) }
+    val iconSize = size * 0.5f
     Box {
         Box(
             modifier = Modifier
                 .size(size)
-                .clip(RoundedCornerShape(10.dp))
+                .clip(RoundedCornerShape(8.dp))
                 .background(background)
                 .clickable {
                     if (links.size == 1) onOpen(links.first())
@@ -278,7 +294,7 @@ private fun RelatedBoardsButton(
             Icon(
                 imageVector = Icons.Default.Link,
                 contentDescription = s.relatedBoards,
-                modifier = Modifier.size(18.dp),
+                modifier = Modifier.size(iconSize.coerceAtLeast(10.dp)),
                 tint = iconTint
             )
         }
@@ -617,7 +633,6 @@ fun BoardScreen(
             enterAddsTask = kairosPrefs.enterAddsTask
         }
     }
-    var isExecutionMode by remember { mutableStateOf(kairosPrefs.isExecutionMode) }
     var showOkrPlanningGuide by remember {
         mutableStateOf(isOkrBoard && !kairosPrefs.hasSeenOkrPlanningGuide)
     }
@@ -633,6 +648,7 @@ fun BoardScreen(
             if (currentTask == null || currentTask.isCompleted) {
                 inProgressTaskId = null
                 kairosPrefs.inProgressTaskId = null
+                KairosWidgetUpdater.updateAll(context, tasks)
             }
         }
     }
@@ -641,7 +657,34 @@ fun BoardScreen(
     val tabRowState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
-    val flingBehavior = rememberSnapFlingBehavior(lazyListState = lazyListState)
+    // Soft pager snap: very low stiffness so page-edge hand-off eases in instead of catching.
+    val hubSnapDecay = rememberSplineBasedDecay<Float>()
+    val hubSnapDensity = LocalDensity.current
+    val flingBehavior = remember(lazyListState, hubSnapDecay, hubSnapDensity) {
+        val snapThresholdPx = with(hubSnapDensity) { 0.5.dp.toPx() }
+        val softSnap = spring(
+            dampingRatio = 0.96f,
+            stiffness = 38f,
+            visibilityThreshold = snapThresholdPx
+        )
+        val softLowVelocity = spring(
+            dampingRatio = 0.98f,
+            stiffness = 28f,
+            visibilityThreshold = snapThresholdPx
+        )
+        val snappingLayout = SnapLayoutInfoProvider(
+            lazyListState = lazyListState,
+            positionInLayout = SnapPositionInLayout { _, _, beforeContentPadding, _, _ ->
+                beforeContentPadding
+            }
+        )
+        SnapFlingBehavior(
+            snapLayoutInfoProvider = snappingLayout,
+            lowVelocityAnimationSpec = softLowVelocity,
+            highVelocityAnimationSpec = hubSnapDecay,
+            snapAnimationSpec = softSnap
+        )
+    }
     var currentColumnIndex by remember { mutableIntStateOf(0) }
     var primaryHubId by remember(currentBoardId) {
         mutableStateOf(kairosPrefs.getPrimaryHubId(currentBoardId))
@@ -649,31 +692,18 @@ fun BoardScreen(
     var lastBoardOpenedForPrimary by remember { mutableStateOf<String?>(null) }
 
     val hubCount = columns.size
-    // Loop when there is at least one hub: order is hubs… then «new hub» as last page.
-    // Pager: [cloneAdd][hubs…][addHub][cloneFirst] — swipe either way wraps through add page.
-    val hubLoop = hubCount >= 1
-    val hubPagerCount = if (hubLoop) hubCount + 3 else hubCount + 1
-    val addHubVirtual = if (hubLoop) hubCount + 1 else hubCount
-    val cloneAddVirtual = 0
-    val cloneFirstVirtual = hubCount + 2
+    // Pager: [hubs…][addHub] — finite carousel (no wrap clones).
+    val hubPagerCount = hubCount + 1
+    val addHubVirtual = hubCount
 
     fun realToVirtual(real: Int): Int =
-        if (hubLoop) real.coerceIn(0, (hubCount - 1).coerceAtLeast(0)) + 1
-        else real.coerceIn(0, (hubCount - 1).coerceAtLeast(0))
+        real.coerceIn(0, (hubCount - 1).coerceAtLeast(0))
 
-    fun isAddHubVirtual(virtual: Int): Boolean =
-        if (hubLoop) virtual == cloneAddVirtual || virtual == addHubVirtual
-        else virtual == hubCount
+    fun isAddHubVirtual(virtual: Int): Boolean = virtual == addHubVirtual
 
     fun virtualToReal(virtual: Int): Int {
         if (hubCount <= 0) return 0
-        if (!hubLoop) return virtual.coerceIn(0, hubCount - 1)
-        return when {
-            // clone of add / real add: chips keep last hub highlighted
-            virtual <= 0 || virtual == addHubVirtual -> hubCount - 1
-            virtual in 1..hubCount -> virtual - 1
-            else -> 0 // clone of first
-        }
+        return virtual.coerceIn(0, hubCount - 1)
     }
 
     fun primaryHubIndex(): Int {
@@ -684,23 +714,29 @@ fun BoardScreen(
     }
 
     fun isPrimaryHub(columnId: String, index: Int): Boolean {
-        val preferred = primaryHubId
-        if (preferred == null) return index == 0
+        val preferred = primaryHubId ?: return index == 0
         val stillExists = columns.any { it.id == preferred }
         return if (stillExists) columnId == preferred else index == 0
     }
 
     LaunchedEffect(currentBoardId) {
-        val stored = kairosPrefs.getPrimaryHubId(currentBoardId)
-        primaryHubId = stored
+        primaryHubId = kairosPrefs.getPrimaryHubId(currentBoardId)
     }
 
-    // Clear stale primary hub id when the column was deleted.
+    // Keep primary hub by id (not by list index). Clear stale ids; if unset, lock to the first
+    // hub so reorder/swipe cannot make the ★ jump to a different column.
     LaunchedEffect(currentBoardId, columns.map { it.id }) {
-        val stored = primaryHubId ?: return@LaunchedEffect
-        if (columns.none { it.id == stored }) {
-            primaryHubId = null
-            kairosPrefs.setPrimaryHubId(currentBoardId, null)
+        if (columns.isEmpty()) return@LaunchedEffect
+        val stored = kairosPrefs.getPrimaryHubId(currentBoardId)
+        when {
+            stored != null && columns.any { it.id == stored } -> {
+                if (primaryHubId != stored) primaryHubId = stored
+            }
+            else -> {
+                val fallback = columns.first().id
+                primaryHubId = fallback
+                kairosPrefs.setPrimaryHubId(currentBoardId, fallback)
+            }
         }
     }
 
@@ -754,22 +790,6 @@ fun BoardScreen(
             ?: lazyListState.firstVisibleItemIndex.coerceIn(0, maxIndex)
     }
 
-    suspend fun remapHubPagerClones() {
-        if (!hubLoop) return
-        when (lazyListState.firstVisibleItemIndex) {
-            cloneAddVirtual -> {
-                // Clone of «new hub» → real add page (last in carousel).
-                lazyListState.scrollToItem(addHubVirtual)
-            }
-            cloneFirstVirtual -> {
-                // Clone of first hub → real first.
-                lazyListState.scrollToItem(1)
-                currentColumnIndex = 0
-            }
-            else -> Unit
-        }
-    }
-
     // Drag state — position floats stay out of composition so DnD doesn't rebuild the whole board
     var draggedTask by remember { mutableStateOf<Task?>(null) }
     val dragPosX = remember { mutableFloatStateOf(0f) }
@@ -783,37 +803,31 @@ fun BoardScreen(
     val hubListBounds = remember { mutableMapOf<String, androidx.compose.ui.geometry.Rect>() }
     val otherBoardBounds = remember { mutableMapOf<String, androidx.compose.ui.geometry.Rect>() }
     var lastDropPreview by remember { mutableStateOf<TaskDropPreview?>(null) }
-    var dropPreview by remember { mutableStateOf<TaskDropPreview?>(null) }
+    val dropPreviewState = remember { mutableStateOf<TaskDropPreview?>(null) }
     var hoveredOtherBoardId by remember { mutableStateOf<String?>(null) }
+
+    // Only the settled hub keeps full TaskCards; peeks stay lite. Settled page updates after
+    // scroll stops — so the open hub keeps its buttons for the whole swipe (cheap enough;
+    // the FPS win is lite neighbors + deferred settle, not stripping the current page).
+    var hubSettledVirtual by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(lazyListState, hubPagerCount) {
         snapshotFlow {
             Triple(
                 lazyListState.isScrollInProgress,
                 draggedTask != null,
-                lazyListState.firstVisibleItemIndex to lazyListState.firstVisibleItemScrollOffset
+                hubVirtualNearCenter()
             )
         }
             .distinctUntilChanged()
-            .collect { (scrolling, dragging, indexOffset) ->
-                if (dragging || scrolling) return@collect
-                val (index, offset) = indexOffset
-                // Wait until snap has fully rested — remapping mid-settle causes hitch on weak GPUs.
-                if (offset > 2) return@collect
-                if (!hubLoop) {
-                    if (!isAddHubVirtual(index)) {
-                        val real = virtualToReal(index)
-                        if (real != currentColumnIndex) currentColumnIndex = real
-                    }
-                    return@collect
-                }
-                when (index) {
-                    cloneAddVirtual -> remapHubPagerClones()
-                    cloneFirstVirtual -> remapHubPagerClones()
-                    in 1..hubCount -> {
-                        val real = index - 1
-                        if (real != currentColumnIndex) currentColumnIndex = real
-                    }
+            .collectLatest { (scrolling, dragging, center) ->
+                if (dragging || scrolling) return@collectLatest
+                // Wait for soft snap ease to finish before swapping lite→full.
+                kotlinx.coroutines.delay(200)
+                hubSettledVirtual = center
+                if (!isAddHubVirtual(center)) {
+                    val real = virtualToReal(center)
+                    if (real != currentColumnIndex) currentColumnIndex = real
                 }
             }
     }
@@ -867,39 +881,32 @@ fun BoardScreen(
     val density = LocalDensity.current
     val screenWidthPx = with(density) { screenWidth.toPx() }
 
-    val columnWidth = screenWidth - 32.dp
+    // Same side inset as TopAppBar actions end padding → ⋮ buttons share one trailing edge
+    val columnWidth = screenWidth - (AlignedMoreEdgeGutter * 2)
     val dropSlotHeightPx = with(density) {
-        (if (isExecutionMode) 56.dp else 84.dp).toPx() + 12.dp.toPx()
+        56.dp.toPx() + 12.dp.toPx()
     }
 
     LaunchedEffect(draggedTask != null) {
         if (draggedTask == null) {
-            dropPreview = null
+            dropPreviewState.value = null
             hoveredOtherBoardId = null
             return@LaunchedEffect
         }
         val edgeH = with(density) { 88.dp.toPx() }
         val edgeV = with(density) { 80.dp.toPx() }
         val maxStep = with(density) { 14.dp.toPx() }
+        val minMovePx = with(density) { 6.dp.toPx() }
         var frame = 0
         var lastPreviewCol: String? = null
         var lastPreviewIndex = Int.MIN_VALUE
+        var lastResolveX = Float.NaN
+        var lastResolveY = Float.NaN
         while (isActive && draggedTask != null) {
             val pos = currentDragPosition()
             val originX = contentOriginX.floatValue
             val widthPx = contentWidthPx.floatValue.takeIf { it > 0f } ?: screenWidthPx
             val localX = pos.x - originX
-            val virtualNow = hubVirtualNearCenter()
-            // Remap edge clones only; keep «new hub» as a normal last page (no drop target).
-            if (hubLoop) {
-                when (virtualNow) {
-                    cloneAddVirtual -> lazyListState.scrollToItem(addHubVirtual)
-                    cloneFirstVirtual -> {
-                        lazyListState.scrollToItem(1)
-                        currentColumnIndex = 0
-                    }
-                }
-            }
             val scrollingHoriz = when {
                 localX > widthPx - edgeH && lazyListState.canScrollForward -> {
                     val ratio = ((localX - (widthPx - edgeH)) / edgeH).coerceIn(0.2f, 1f)
@@ -933,7 +940,14 @@ fun BoardScreen(
             }
 
             frame++
-            if (!scrollingHoriz || frame % 3 == 0) {
+            val movedEnough = lastResolveX.isNaN() ||
+                kotlin.math.abs(pos.x - lastResolveX) >= minMovePx ||
+                kotlin.math.abs(pos.y - lastResolveY) >= minMovePx
+            // Edge-scroll every tick; resolve drop slot only when pointer moved or hub page scrolled.
+            val shouldResolve = movedEnough || (scrollingHoriz && frame % 3 == 0)
+            if (shouldResolve && (!scrollingHoriz || frame % 3 == 0 || movedEnough)) {
+                lastResolveX = pos.x
+                lastResolveY = pos.y
                 val hoveredBoard = otherBoardBounds.entries.firstOrNull { it.value.contains(pos) }?.key
                 if (hoveredBoard != hoveredOtherBoardId) {
                     hoveredOtherBoardId = hoveredBoard
@@ -951,7 +965,7 @@ fun BoardScreen(
                 if (previewChanged) {
                     lastPreviewCol = nextPreview?.columnId
                     lastPreviewIndex = nextPreview?.insertIndex ?: Int.MIN_VALUE
-                    dropPreview = nextPreview
+                    dropPreviewState.value = nextPreview
                 }
                 lastDropPreview = nextPreview
             }
@@ -964,7 +978,7 @@ fun BoardScreen(
         val dragged = draggedTask ?: return
         draggedTask = null
         val previewSnapshot = lastDropPreview
-        dropPreview = null
+        dropPreviewState.value = null
         hoveredOtherBoardId = null
         lastDropPreview = null
 
@@ -1330,26 +1344,15 @@ fun BoardScreen(
                             )
                         }
                     }
-                    Box {
-                        IconButton(
-                            onClick = { topBarMenuExpanded = true },
-                            modifier = Modifier.size(40.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.MoreVert,
-                                contentDescription = s.moreActions,
-                                tint = if (boardOverdueOnly) {
-                                    MaterialTheme.colorScheme.error
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                },
-                                modifier = Modifier.size(22.dp)
-                            )
+                    AlignedMoreMenuButton(
+                        expanded = topBarMenuExpanded,
+                        onExpandedChange = { topBarMenuExpanded = it },
+                        tint = if (boardOverdueOnly) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
                         }
-                        DropdownMenu(
-                            expanded = topBarMenuExpanded,
-                            onDismissRequest = { topBarMenuExpanded = false }
-                        ) {
+                    ) {
                             DropdownMenuItem(
                                 text = { Text(s.projects) },
                                 onClick = {
@@ -1437,6 +1440,69 @@ fun BoardScreen(
                                 },
                                 leadingIcon = { Icon(Icons.Default.PostAdd, contentDescription = null) }
                             )
+                            if (columns.isNotEmpty()) {
+                                HorizontalDivider(
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                                )
+                                Text(
+                                    text = s.allHubsHeader(columns.size),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                                )
+                                Column(
+                                    modifier = Modifier
+                                        .heightIn(max = 280.dp)
+                                        .verticalScroll(rememberScrollState())
+                                ) {
+                                    columns.forEachIndexed { index, col ->
+                                        val isSelected = index == currentColumnIndex
+                                        val showPrimaryMark = isPrimaryHub(col.id, index)
+                                        DropdownMenuItem(
+                                            text = {
+                                                Text(
+                                                    text = s.localized(col.title),
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    fontWeight = if (isSelected) {
+                                                        FontWeight.SemiBold
+                                                    } else {
+                                                        FontWeight.Normal
+                                                    }
+                                                )
+                                            },
+                                            onClick = {
+                                                topBarMenuExpanded = false
+                                                if (index != currentColumnIndex) {
+                                                    coroutineScope.launch {
+                                                        lazyListState.animateScrollToItem(
+                                                            realToVirtual(index)
+                                                        )
+                                                    }
+                                                }
+                                            },
+                                            leadingIcon = if (showPrimaryMark) {
+                                                {
+                                                    Icon(
+                                                        Icons.Default.Star,
+                                                        contentDescription = s.primaryHub,
+                                                        tint = MaterialTheme.colorScheme.primary
+                                                    )
+                                                }
+                                            } else {
+                                                null
+                                            },
+                                            trailingIcon = if (isSelected) {
+                                                {
+                                                    Icon(Icons.Default.Check, contentDescription = null)
+                                                }
+                                            } else {
+                                                null
+                                            }
+                                        )
+                                    }
+                                }
+                            }
                             if (compactWidth) {
                                 DropdownMenuItem(
                                     text = { Text(s.hubOrder) },
@@ -1473,7 +1539,6 @@ fun BoardScreen(
                                     leadingIcon = { Icon(Icons.Default.KeyboardArrowUp, contentDescription = null) }
                                 )
                             }
-                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -1525,68 +1590,41 @@ fun BoardScreen(
         },
         floatingActionButton = {
             if (draggedTask == null && columns.isNotEmpty()) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                Box(
+                    modifier = Modifier
+                        .size(56.dp)
+                        .shadow(10.dp, CircleShape)
+                        .clip(CircleShape)
+                        .background(newProjectGradient)
+                        .clickable {
+                            val visible = lazyListState.layoutInfo.visibleItemsInfo
+                            val maxVirtual = (hubPagerCount - 1).coerceAtLeast(0)
+                            val virtual = if (visible.isEmpty()) {
+                                realToVirtual(currentColumnIndex)
+                            } else {
+                                val viewportCenter =
+                                    (lazyListState.layoutInfo.viewportStartOffset + lazyListState.layoutInfo.viewportEndOffset) / 2
+                                visible.minByOrNull { item ->
+                                    kotlin.math.abs((item.offset + item.size / 2) - viewportCenter)
+                                }?.index ?: realToVirtual(currentColumnIndex)
+                            }.coerceIn(0, maxVirtual)
+                            val targetIndex = if (isAddHubVirtual(virtual)) {
+                                currentColumnIndex
+                            } else {
+                                virtualToReal(virtual)
+                            }.coerceIn(0, (columns.size - 1).coerceAtLeast(0))
+                            val targetColId = columns.getOrNull(targetIndex)?.id ?: columns.firstOrNull()?.id
+                            isAddingTaskToColumn = targetColId
+                            newTaskShowEisenhower = true
+                        },
+                    contentAlignment = Alignment.Center
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(56.dp)
-                            .shadow(8.dp, CircleShape)
-                            .clip(CircleShape)
-                            .background(modeSwitchGradient)
-                            .clickable {
-                                isExecutionMode = !isExecutionMode
-                                kairosPrefs.isExecutionMode = isExecutionMode
-                                val modeLabel = if (isExecutionMode) s.executionMode else s.planningMode
-                                Toast.makeText(context, modeLabel, Toast.LENGTH_SHORT).show()
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = if (isExecutionMode) Icons.Default.Bolt else Icons.Default.ViewAgenda,
-                            contentDescription = if (isExecutionMode) s.executionMode else s.planningMode,
-                            tint = Color.White,
-                            modifier = Modifier.size(26.dp)
-                        )
-                    }
-
-                    Box(
-                        modifier = Modifier
-                            .size(56.dp)
-                            .shadow(10.dp, CircleShape)
-                            .clip(CircleShape)
-                            .background(newProjectGradient)
-                            .clickable {
-                                val visible = lazyListState.layoutInfo.visibleItemsInfo
-                                val maxVirtual = (hubPagerCount - 1).coerceAtLeast(0)
-                                val virtual = if (visible.isEmpty()) {
-                                    realToVirtual(currentColumnIndex)
-                                } else {
-                                    val viewportCenter =
-                                        (lazyListState.layoutInfo.viewportStartOffset + lazyListState.layoutInfo.viewportEndOffset) / 2
-                                    visible.minByOrNull { item ->
-                                        kotlin.math.abs((item.offset + item.size / 2) - viewportCenter)
-                                    }?.index ?: realToVirtual(currentColumnIndex)
-                                }.coerceIn(0, maxVirtual)
-                                val targetIndex = if (isAddHubVirtual(virtual)) {
-                                    currentColumnIndex
-                                } else {
-                                    virtualToReal(virtual)
-                                }.coerceIn(0, (columns.size - 1).coerceAtLeast(0))
-                                val targetColId = columns.getOrNull(targetIndex)?.id ?: columns.firstOrNull()?.id
-                                isAddingTaskToColumn = targetColId
-                                newTaskShowEisenhower = true
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            Icons.Default.Add,
-                            contentDescription = s.addTask,
-                            tint = Color.White,
-                            modifier = Modifier.size(28.dp)
-                        )
-                    }
+                    Icon(
+                        Icons.Default.Add,
+                        contentDescription = s.addTask,
+                        tint = Color.White,
+                        modifier = Modifier.size(28.dp)
+                    )
                 }
             }
         },
@@ -1862,23 +1900,24 @@ fun BoardScreen(
                     items(
                         count = hubPagerCount,
                         key = { virtual ->
-                            when {
-                                hubLoop && virtual == cloneAddVirtual -> "wrap-add-hub"
-                                hubLoop && virtual == cloneFirstVirtual -> "wrap-head-${columns.first().id}"
-                                virtual == addHubVirtual || (!hubLoop && virtual == hubCount) -> "add-hub-page"
-                                else -> columns[virtualToReal(virtual)].id
-                            }
+                            if (isAddHubVirtual(virtual)) "add-hub-page"
+                            else columns[virtualToReal(virtual)].id
+                        },
+                        contentType = { virtual ->
+                            if (isAddHubVirtual(virtual)) 0 else 1
                         }
                     ) { virtual ->
                         if (isAddHubVirtual(virtual)) {
                             Box(
-                                modifier = Modifier.fillParentMaxWidth(),
+                                modifier = Modifier
+                                    .fillParentMaxWidth()
+                                    .padding(horizontal = AlignedMoreEdgeGutter),
                                 contentAlignment = Alignment.TopCenter
                             ) {
                                 OutlinedButton(
                                     onClick = { isAddingColumn = true },
                                     modifier = Modifier
-                                        .width(columnWidth)
+                                        .fillMaxWidth()
                                         .padding(top = 12.dp)
                                         .height(64.dp),
                                     shape = RoundedCornerShape(10.dp),
@@ -1910,23 +1949,15 @@ fun BoardScreen(
                             return@items
                         }
 
-                        val isWrapClone = hubLoop && virtual == cloneFirstVirtual
                         val index = virtualToReal(virtual)
                         val column = columns[index]
                         val columnTasks = tasksInHub(column, index)
-                        val prevColumn = when {
-                            columns.size < 2 -> null
-                            index > 0 -> columns[index - 1]
-                            else -> columns.last()
-                        }
-                        val nextColumn = when {
-                            columns.size < 2 -> null
-                            index < columns.size - 1 -> columns[index + 1]
-                            else -> columns.first()
-                        }
+                        val useLiteCards = draggedTask == null && virtual != hubSettledVirtual
 
                         Box(
-                            modifier = Modifier.fillParentMaxWidth(),
+                            modifier = Modifier
+                                .fillParentMaxWidth()
+                                .padding(horizontal = AlignedMoreEdgeGutter),
                             contentAlignment = Alignment.TopCenter
                         ) {
                         ColumnItem(
@@ -1934,56 +1965,27 @@ fun BoardScreen(
                             columnIndex = index,
                             tasks = columnTasks,
                             categories = categories,
-                            comments = comments,
-                            allColumns = state.columns,
-                            boards = state.boards,
+                            commentCountByTaskId = commentCountByTaskId,
                             currentBoardId = currentBoardId,
                             onOpenBoard = { targetBoardId, targetColumnId ->
                                 openBoardAtHub(targetBoardId, targetColumnId)
                             },
-                            isEisenhowerBoard = isEisenhowerBoard,
-                            prevColumn = prevColumn,
-                            nextColumn = nextColumn,
                             activeInProgressTaskId = inProgressTaskId,
                             highlightedTaskId = highlightedTaskId,
                             onToggleInProgress = { task ->
                                 val next = if (inProgressTaskId == task.id) null else task.id
                                 inProgressTaskId = next
                                 kairosPrefs.inProgressTaskId = next
+                                KairosWidgetUpdater.updateAll(context, tasks)
                                 if (next != null) {
                                     Toast.makeText(context, s.inProgressToast(task.title), Toast.LENGTH_SHORT).show()
                                 }
                             },
-                            onQuickMoveTask = { task, targetColId ->
-                                val targetCol = columns.find { it.id == targetColId }
-                                val targetIndex = columns.indexOfFirst { it.id == targetColId }
-                                val targetQuadrant = if (targetCol != null) getQuadrantForCol(targetCol, targetIndex) else null
-
-                                if (isEisenhowerBoard && targetQuadrant != null) {
-                                    val isFromAnotherBoard = state.columns.find { it.id == task.columnId }?.boardId != currentBoardId
-                                    if (isFromAnotherBoard) {
-                                        viewModel.setTaskQuadrant(task, targetQuadrant)
-                                    } else {
-                                        val tasksInTargetCol = tasks.filter { it.columnId == targetColId }
-                                        viewModel.moveTask(task.copy(eisenhowerQuadrant = targetQuadrant), targetColId, tasksInTargetCol.size, tasks)
-                                    }
-                                } else {
-                                    val tasksInTargetCol = tasks.filter { it.columnId == targetColId }
-                                    viewModel.moveTask(task, targetColId, tasksInTargetCol.size, tasks)
-                                }
-
-                                if (targetIndex >= 0) {
-                                    coroutineScope.launch {
-                                        lazyListState.animateScrollToItem(realToVirtual(targetIndex))
-                                    }
-                                }
-                            },
                             onColumnPositioned = { rect ->
-                                // Clones share column.id with real hubs — never overwrite DnD hit boxes.
-                                if (!isWrapClone) columnBounds[column.id] = rect
+                                columnBounds[column.id] = rect
                             },
                             onTaskPositioned = { task, rect ->
-                                if (!isWrapClone) taskBounds[task.id] = rect
+                                taskBounds[task.id] = rect
                             },
                             onDragStart = { task, offset ->
                                 draggedTask = task
@@ -1998,7 +2000,6 @@ fun BoardScreen(
                             onDragEnd = {
                                 finishTaskDrag()
                             },
-                            columnWidth = columnWidth,
                             onDeleteColumnClick = {
                                 if (columns.size <= 1) {
                                     Toast.makeText(context, s.cannotDeleteLastHub, Toast.LENGTH_SHORT).show()
@@ -2010,33 +2011,8 @@ fun BoardScreen(
                                 columnToRename = column
                                 renameColumnTitle = column.title
                             },
-                            onRevealHubsList = {
-                                showTopBar = true
-                                showColumnHeaders = true
-                            },
-                            onRevealBoardsList = {
-                                showTopBar = true
-                                showColumnHeaders = true
-                                showBoardsList = true
-                            },
-                            onCollapseOneLevel = {
-                                when {
-                                    showBoardsList -> showBoardsList = false
-                                    showColumnHeaders -> showColumnHeaders = false
-                                }
-                            },
-                            onCollapseAllLists = {
-                                showBoardsList = false
-                                showColumnHeaders = false
-                            },
-                            onHideTopBar = {
-                                showTopBar = false
-                                showBoardsList = false
-                                showColumnHeaders = false
-                            },
                             onCommentColumnClick = { columnForComments = column },
                             columnCommentsCount = columnCommentCountById[column.id] ?: 0,
-                            commentCountByTaskId = commentCountByTaskId,
                             onEditTaskClick = { task ->
                                 taskToEdit = task
                                 editTaskTitle = task.title
@@ -2057,17 +2033,16 @@ fun BoardScreen(
                                 taskForMoveHubId = column.id
                             },
                             draggedTaskId = draggedTask?.id,
-                            isCompactMode = isExecutionMode,
-                            isDropTarget = !isWrapClone && dropPreview?.columnId == column.id,
-                            dropInsertIndex = if (isWrapClone) null
-                            else dropPreview?.takeIf { it.columnId == column.id }?.insertIndex,
-                            reportPositions = !isWrapClone,
+                            dropPreviewState = dropPreviewState,
+                            observeDropPreview = !useLiteCards,
+                            reportPositions = draggedTask != null && !useLiteCards,
+                            useLiteCards = useLiteCards,
                             relatedBoardsByTaskId = relatedBoardsByTaskId,
                             onHubScrollState = {
-                                if (!isWrapClone) hubScrollStates[column.id] = it
+                                hubScrollStates[column.id] = it
                             },
                             onHubListPositioned = { rect ->
-                                if (!isWrapClone) hubListBounds[column.id] = rect
+                                hubListBounds[column.id] = rect
                             },
                             onToggleCompleted = { completeTaskWithUndo(it) },
                             viewModel = viewModel
@@ -2192,14 +2167,35 @@ fun BoardScreen(
                                     }
                                 )
                             )
-                            Spacer(modifier = Modifier.height(10.dp))
-                            Text(
-                                text = if (enterAddsTask) s.enterSavesTask else s.enterAddsNewline,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis
-                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable {
+                                        val next = !enterAddsTask
+                                        enterAddsTask = next
+                                        kairosPrefs.enterAddsTask = next
+                                    }
+                                    .padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = s.enterSavesTask,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f).padding(end = 8.dp)
+                                )
+                                Switch(
+                                    checked = enterAddsTask,
+                                    onCheckedChange = {
+                                        enterAddsTask = it
+                                        kairosPrefs.enterAddsTask = it
+                                    }
+                                )
+                            }
                             Spacer(modifier = Modifier.height(16.dp))
 
                             if (columns.size > 1) {
@@ -3039,12 +3035,10 @@ fun BoardScreen(
                         .fillMaxSize()
                         .zIndex(100f)
                 ) {
-                    TaskCard(
-                        task = task,
-                        categories = categories,
-                        viewModel = viewModel,
-                        isCompact = isExecutionMode,
-                        isDragPreview = true,
+                    DragGhostCard(
+                        title = task.title,
+                        eisenhowerQuadrant = task.eisenhowerQuadrant,
+                        isCompleted = task.isCompleted,
                         modifier = Modifier
                             .width(cardWidth)
                             .graphicsLayer {
@@ -3056,13 +3050,7 @@ fun BoardScreen(
                                 scaleY = 1.03f
                                 alpha = 0.95f
                                 shadowElevation = 16.dp.toPx()
-                            },
-                        onPositioned = {},
-                        onDragStart = { _ -> },
-                        onDrag = { _ -> },
-                        onDragEnd = {},
-                        onEditClick = {},
-                        onDeleteClick = {}
+                            }
                     )
                 }
             }
@@ -3224,37 +3212,24 @@ fun ManageCategoriesDialog(
 }
 
 @Composable
-fun ColumnItem(
+private fun ColumnItem(
     column: Column,
     columnIndex: Int = 0,
     tasks: List<Task>,
     categories: List<Category>,
-    comments: List<Comment>,
     commentCountByTaskId: Map<String, Int> = emptyMap(),
-    allColumns: List<Column> = emptyList(),
-    boards: List<Board> = emptyList(),
     currentBoardId: String = "",
     onOpenBoard: (boardId: String, columnId: String) -> Unit = { _, _ -> },
-    isEisenhowerBoard: Boolean = false,
-    prevColumn: Column? = null,
-    nextColumn: Column? = null,
     activeInProgressTaskId: String? = null,
     highlightedTaskId: String? = null,
     onToggleInProgress: (Task) -> Unit = {},
-    onQuickMoveTask: ((Task, String) -> Unit)? = null,
     onColumnPositioned: (androidx.compose.ui.geometry.Rect) -> Unit,
     onTaskPositioned: (Task, androidx.compose.ui.geometry.Rect) -> Unit,
     onDragStart: (Task, Offset) -> Unit,
     onDrag: (Offset) -> Unit,
     onDragEnd: () -> Unit,
-    columnWidth: androidx.compose.ui.unit.Dp,
     onDeleteColumnClick: () -> Unit,
     onRenameColumnClick: () -> Unit,
-    onRevealHubsList: () -> Unit = {},
-    onRevealBoardsList: () -> Unit = {},
-    onCollapseOneLevel: () -> Unit = {},
-    onCollapseAllLists: () -> Unit = {},
-    onHideTopBar: () -> Unit = {},
     onEditTaskClick: (Task) -> Unit,
     onDeleteTaskClick: (String) -> Unit,
     onCommentClick: (Task) -> Unit,
@@ -3262,10 +3237,10 @@ fun ColumnItem(
     columnCommentsCount: Int = 0,
     onCommentColumnClick: () -> Unit = {},
     draggedTaskId: String? = null,
-    isCompactMode: Boolean = false,
-    isDropTarget: Boolean = false,
-    dropInsertIndex: Int? = null,
+    dropPreviewState: State<TaskDropPreview?>,
+    observeDropPreview: Boolean = true,
     reportPositions: Boolean = false,
+    useLiteCards: Boolean = false,
     relatedBoardsByTaskId: Map<String, List<RelatedBoardLink>> = emptyMap(),
     onHubScrollState: (androidx.compose.foundation.lazy.LazyListState) -> Unit = {},
     onHubListPositioned: (androidx.compose.ui.geometry.Rect) -> Unit = {},
@@ -3274,6 +3249,18 @@ fun ColumnItem(
 ) {
     val context = LocalContext.current
     val s = LocalAppStrings.current
+    val isDropTarget by remember(column.id, observeDropPreview) {
+        derivedStateOf {
+            observeDropPreview && dropPreviewState.value?.columnId == column.id
+        }
+    }
+    val dropInsertIndex by remember(column.id, observeDropPreview) {
+        derivedStateOf {
+            if (!observeDropPreview) null
+            else dropPreviewState.value?.takeIf { it.columnId == column.id }?.insertIndex
+        }
+    }
+    val insertIndex = dropInsertIndex
     var showHiddenTasks by remember { mutableStateOf(false) }
     val hiddenCount = remember(tasks) { tasks.count { it.isHidden } }
     val activeTasks = remember(tasks, showHiddenTasks) {
@@ -3291,11 +3278,14 @@ fun ColumnItem(
     LaunchedEffect(hubListState) {
         onHubScrollState(hubListState)
     }
-    var hubSwipeOffsetX by remember { mutableFloatStateOf(0f) }
-    val hubMaxSwipePx = with(density) { 192.dp.toPx() }
-    val hubPullHubsPx = with(density) { 48.dp.toPx() }
-    val hubPullBoardsPx = with(density) { 96.dp.toPx() }
-    val hubPullHideTopPx = with(density) { 144.dp.toPx() }
+    var hubMenuExpanded by remember { mutableStateOf(false) }
+    // Non-Compose counter: bump while lite without recomposing the hub list mid-swipe.
+    val actionsRevealEpoch = remember { java.util.concurrent.atomic.AtomicInteger(0) }
+    LaunchedEffect(useLiteCards) {
+        if (useLiteCards) {
+            actionsRevealEpoch.incrementAndGet()
+        }
+    }
 
     val hubColors = listOf(
         Color(0xFF2563EB), // Blue
@@ -3308,7 +3298,7 @@ fun ColumnItem(
 
     androidx.compose.foundation.layout.Column(
         modifier = Modifier
-            .width(columnWidth)
+            .fillMaxWidth()
             .fillMaxHeight()
             .clip(RoundedCornerShape(12.dp))
             .background(
@@ -3337,287 +3327,138 @@ fun ColumnItem(
                     Modifier
                 }
             )
-            .padding(12.dp)
+            .padding(horizontal = 0.dp, vertical = 12.dp)
     ) {
-        // Swipeable Hub Header: pulling left reveals Rename and Delete
-        Box(
+        // Hub header: menu for actions (no pull gestures — keeps hub paging smooth)
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clipToBounds()
-                .padding(bottom = 12.dp)
+                .padding(bottom = 8.dp)
+                // end gutter matches TopAppBar actions end padding (4.dp) so ⋮ stacks vertically
+                .padding(start = 8.dp, end = 0.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            // Revealed Actions behind header (completely invisible when offset is 0)
             Row(
-                modifier = Modifier
-                    .align(Alignment.CenterEnd)
-                    .height(44.dp)
-                    .padding(end = 4.dp)
-                    .graphicsLayer {
-                        alpha = ((-hubSwipeOffsetX) / 30f).coerceIn(0f, 1f)
-                    },
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                modifier = Modifier.weight(1f)
             ) {
-                // Comments button
                 Box(
                     modifier = Modifier
-                        .size(38.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primaryContainer)
-                        .clickable {
-                            hubSwipeOffsetX = 0f
-                            onCommentColumnClick()
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.Comment,
-                        contentDescription = s.hubRules,
-                        modifier = Modifier.size(18.dp),
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                    if (columnCommentsCount > 0) {
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.TopEnd)
-                                .offset(x = 2.dp, y = (-2).dp)
-                                .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.primary)
-                                .padding(horizontal = 4.dp, vertical = 1.dp)
-                        ) {
-                            Text(
-                                text = columnCommentsCount.toString(),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onPrimary,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = androidx.compose.ui.unit.TextUnit(9f, androidx.compose.ui.unit.TextUnitType.Sp)
-                            )
-                        }
-                    }
-                }
-
+                        .size(width = 4.dp, height = 20.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(hubColor)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = s.localized(column.title),
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            if (hiddenCount > 0) {
                 Box(
                     modifier = Modifier
-                        .size(38.dp)
-                        .clip(CircleShape)
+                        .padding(end = 2.dp)
+                        .size(36.dp)
+                        .clip(RoundedCornerShape(10.dp))
                         .background(
                             if (showHiddenTasks) MaterialTheme.colorScheme.primary
                             else MaterialTheme.colorScheme.secondaryContainer
                         )
-                        .clickable {
-                            hubSwipeOffsetX = 0f
-                            showHiddenTasks = !showHiddenTasks
-                        },
+                        .clickable { showHiddenTasks = !showHiddenTasks },
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = if (showHiddenTasks) Icons.Default.Visibility else Icons.Default.VisibilityOff,
                         contentDescription = if (showHiddenTasks) s.hideHiddenTasks else s.showHiddenTasks,
                         modifier = Modifier.size(18.dp),
-                        tint = if (showHiddenTasks) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSecondaryContainer
+                        tint = if (showHiddenTasks) {
+                            MaterialTheme.colorScheme.onPrimary
+                        } else {
+                            MaterialTheme.colorScheme.onSecondaryContainer
+                        }
                     )
-                    if (hiddenCount > 0 && !showHiddenTasks) {
+                    if (!showHiddenTasks) {
                         Box(
                             modifier = Modifier
                                 .align(Alignment.TopEnd)
                                 .offset(x = 2.dp, y = (-2).dp)
                                 .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.primary)
-                                .padding(horizontal = 4.dp, vertical = 1.dp)
+                                .background(MaterialTheme.colorScheme.error)
+                                .padding(horizontal = 4.dp, vertical = 0.dp)
                         ) {
                             Text(
                                 text = hiddenCount.toString(),
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onPrimary,
+                                color = MaterialTheme.colorScheme.onError,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = androidx.compose.ui.unit.TextUnit(9f, androidx.compose.ui.unit.TextUnitType.Sp)
                             )
                         }
                     }
                 }
-
-                Box(
-                    modifier = Modifier
-                        .size(38.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.surfaceVariant)
-                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape)
-                        .clickable {
-                            hubSwipeOffsetX = 0f
-                            onRenameColumnClick()
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        Icons.Default.Edit,
-                        contentDescription = s.renameHub,
-                        modifier = Modifier.size(18.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-
-                Box(
-                    modifier = Modifier
-                        .size(38.dp)
-                        .clip(CircleShape)
-                        .background(deleteButtonGradient)
-                        .clickable {
-                            hubSwipeOffsetX = 0f
-                            onDeleteColumnClick()
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        Icons.Default.Delete,
-                        contentDescription = s.deleteHub,
-                        modifier = Modifier.size(18.dp),
-                        tint = Color.White
-                    )
-                }
             }
-
-            // Foreground header that slides left
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(44.dp)
-                    .offset { IntOffset(hubSwipeOffsetX.roundToInt(), 0) }
-                    .background(MaterialTheme.colorScheme.surfaceVariant)
-                    .pointerInput(column.id) {
-                        var totalX = 0f
-                        var totalY = 0f
-                        var dragMode: Int? = null // 1 = horizontal, 2 = vertical
-                        detectDragGestures(
-                            onDragStart = {
-                                totalX = 0f
-                                totalY = 0f
-                                dragMode = null
-                            },
-                            onDrag = { change, dragAmount ->
-                                totalX += dragAmount.x
-                                totalY += dragAmount.y
-                                if (dragMode == null && (abs(totalX) > 10f || abs(totalY) > 10f)) {
-                                    dragMode = if (abs(totalY) > abs(totalX)) 2 else 1
-                                }
-                                when (dragMode) {
-                                    1 -> {
-                                        change.consume()
-                                        hubSwipeOffsetX =
-                                            (hubSwipeOffsetX + dragAmount.x).coerceIn(-hubMaxSwipePx, 0f)
-                                    }
-                                    2 -> {
-                                        // Only track distance while dragging — apply chrome once on end
-                                        // so expand/collapse animations don't fight the gesture (jank).
-                                        change.consume()
-                                    }
-                                }
-                            },
-                            onDragEnd = {
-                                when (dragMode) {
-                                    1 -> {
-                                        hubSwipeOffsetX =
-                                            if (hubSwipeOffsetX < -hubMaxSwipePx * 0.4f) -hubMaxSwipePx else 0f
-                                    }
-                                    2 -> {
-                                        when {
-                                            totalY >= hubPullBoardsPx -> onRevealBoardsList()
-                                            totalY >= hubPullHubsPx -> onRevealHubsList()
-                                            totalY <= -hubPullHideTopPx -> onHideTopBar()
-                                            totalY <= -hubPullBoardsPx -> onCollapseAllLists()
-                                            totalY <= -hubPullHubsPx -> onCollapseOneLevel()
-                                        }
-                                    }
-                                }
-                                dragMode = null
-                            },
-                            onDragCancel = {
-                                if (dragMode == 1) hubSwipeOffsetX = 0f
-                                dragMode = null
-                            }
-                        )
-                    }
-                    .clickable {
-                        if (hubSwipeOffsetX < 0f) hubSwipeOffsetX = 0f
-                    }
-                    .padding(start = 8.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+            AlignedMoreMenuButton(
+                expanded = hubMenuExpanded,
+                onExpandedChange = { hubMenuExpanded = it }
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(width = 4.dp, height = 20.dp)
-                            .clip(RoundedCornerShape(2.dp))
-                            .background(hubColor)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = s.localized(column.title),
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-                if (hiddenCount > 0) {
-                    Box(
-                        modifier = Modifier
-                            .padding(end = 4.dp)
-                            .size(36.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(
-                                if (showHiddenTasks) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.secondaryContainer
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                if (columnCommentsCount > 0) s.commentsCount(columnCommentsCount) else s.hubRules
                             )
-                            .clickable { showHiddenTasks = !showHiddenTasks },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = if (showHiddenTasks) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                            contentDescription = if (showHiddenTasks) s.hideHiddenTasks else s.showHiddenTasks,
-                            modifier = Modifier.size(18.dp),
-                            tint = if (showHiddenTasks) {
-                                MaterialTheme.colorScheme.onPrimary
-                            } else {
-                                MaterialTheme.colorScheme.onSecondaryContainer
-                            }
-                        )
-                        if (!showHiddenTasks) {
-                            Box(
-                                modifier = Modifier
-                                    .align(Alignment.TopEnd)
-                                    .offset(x = 2.dp, y = (-2).dp)
-                                    .clip(CircleShape)
-                                    .background(MaterialTheme.colorScheme.error)
-                                    .padding(horizontal = 4.dp, vertical = 0.dp)
-                            ) {
-                                Text(
-                                    text = hiddenCount.toString(),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onError,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = androidx.compose.ui.unit.TextUnit(9f, androidx.compose.ui.unit.TextUnitType.Sp)
+                        },
+                        onClick = {
+                            hubMenuExpanded = false
+                            onCommentColumnClick()
+                        },
+                        leadingIcon = {
+                            Icon(Icons.AutoMirrored.Filled.Comment, contentDescription = null)
+                        }
+                    )
+                    if (hiddenCount > 0) {
+                        DropdownMenuItem(
+                            text = {
+                                Text(if (showHiddenTasks) s.hideHiddenTasks else s.showHiddenTasks)
+                            },
+                            onClick = {
+                                hubMenuExpanded = false
+                                showHiddenTasks = !showHiddenTasks
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    if (showHiddenTasks) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                    contentDescription = null
                                 )
                             }
-                        }
+                        )
                     }
-                }
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp),
-                    tint = hubColor.copy(alpha = 0.65f)
-                )
+                    DropdownMenuItem(
+                        text = { Text(s.renameHub) },
+                        onClick = {
+                            hubMenuExpanded = false
+                            onRenameColumnClick()
+                        },
+                        leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) }
+                    )
+                    DropdownMenuItem(
+                        text = { Text(s.deleteHub) },
+                        onClick = {
+                            hubMenuExpanded = false
+                            onDeleteColumnClick()
+                        },
+                        leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) }
+                    )
             }
         }
-
         LazyColumn(
             state = hubListState,
+            userScrollEnabled = !useLiteCards,
             modifier = Modifier
                 .fillMaxHeight()
                 .then(
@@ -3640,7 +3481,9 @@ fun ColumnItem(
             contentPadding = PaddingValues(bottom = 88.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            if (visibleActiveTasks.isEmpty() && completedTasks.isEmpty() && dropInsertIndex == null) {
+            // Same item count for lite and full — peek limit caused a vertical jump on settle.
+            val listTasks = visibleActiveTasks
+            if (visibleActiveTasks.isEmpty() && completedTasks.isEmpty() && insertIndex == null) {
                 item {
                     Box(
                         modifier = Modifier
@@ -3656,79 +3499,91 @@ fun ColumnItem(
                     }
                 }
             } else {
-                itemsIndexed(visibleActiveTasks, key = { _, task -> task.id }) { index, task ->
+                itemsIndexed(listTasks, key = { _, task -> task.id }) { index, task ->
+                    if (useLiteCards) {
+                        val category = categories.find { it.id == task.categoryId }
+                        LiteTaskRow(
+                            title = task.title,
+                            eisenhowerQuadrant = task.eisenhowerQuadrant.takeIf { !task.isCompleted },
+                            categoryColor = category
+                                ?.takeUnless { KanbanNames.isUncategorized(it.name) }
+                                ?.let { Color(it.color) },
+                            isOverdue = !task.isCompleted && task.dueDate != null && task.dueDate.isOverdueDate(),
+                            isInProgress = activeInProgressTaskId == task.id,
+                            isCompleted = false,
+                            hasDueDate = task.dueDate != null,
+                            hasRelated = relatedBoardsByTaskId[task.id].orEmpty().isNotEmpty()
+                        )
+                    } else {
                     val taskCommentsCount = commentCountByTaskId[task.id] ?: 0
                     val relatedBoards = relatedBoardsByTaskId[task.id].orEmpty()
                     val filteredIndex = if (draggedTaskId == null) index
                     else visibleActiveTasks.take(index).count { it.id != draggedTaskId }
 
                     androidx.compose.foundation.layout.Column(modifier = Modifier.fillMaxWidth()) {
-                        if (dropInsertIndex != null && task.id != draggedTaskId && dropInsertIndex == filteredIndex) {
-                            DropInsertSlot(isCompact = isCompactMode)
+                        if (insertIndex != null && task.id != draggedTaskId && insertIndex == filteredIndex) {
+                            DropInsertSlot()
                             Spacer(modifier = Modifier.height(12.dp))
                         }
                         TaskCard(
-                        task = task,
-                        categories = categories,
-                        viewModel = viewModel,
-                        commentsCount = taskCommentsCount,
-                        isInProgress = activeInProgressTaskId == task.id,
-                        isHighlighted = highlightedTaskId == task.id,
-                        isAnyTaskInProgress = activeInProgressTaskId != null,
-                        isDragging = draggedTaskId == task.id,
-                        isCompact = isCompactMode,
-                        relatedBoards = relatedBoards,
-                        onOpenRelatedBoard = onOpenBoard,
-                        onRemoveFromBoard = if (relatedBoards.isNotEmpty()) {
-                            {
-                                viewModel.removeTaskFromBoard(task, currentBoardId)
-                                Toast.makeText(context, s.taskRemovedFromBoard, Toast.LENGTH_SHORT).show()
-                            }
-                        } else null,
-                        onSetQuadrant = { q ->
-                            viewModel.setTaskQuadrant(task, q)
-                            val msg = if (q != null) {
-                                s.addedToMatrix(q)
-                            } else {
-                                s.removedFromMatrix
-                            }
-                            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
-                        },
-                        onToggleInProgress = { onToggleInProgress(task) },
-                        prevColumnTitle = prevColumn?.title,
-                        nextColumnTitle = nextColumn?.title,
-                        onQuickMovePrev = if (prevColumn != null && onQuickMoveTask != null) {
-                            {
-                                onQuickMoveTask(task, prevColumn.id)
-                                Toast.makeText(context, s.movedToHub(s.localized(prevColumn.title)), Toast.LENGTH_SHORT).show()
-                            }
-                        } else null,
-                        onQuickMoveNext = if (nextColumn != null && onQuickMoveTask != null) {
-                            {
-                                onQuickMoveTask(task, nextColumn.id)
-                                Toast.makeText(context, s.movedToHub(s.localized(nextColumn.title)), Toast.LENGTH_SHORT).show()
-                            }
-                        } else null,
-                        onCommentClick = { onCommentClick(task) },
-                        onMoveClick = { onMoveTaskClick(task) },
-                        reportPosition = reportPositions,
-                        onPositioned = { rect -> onTaskPositioned(task, rect) },
-                        onDragStart = { offset -> onDragStart(task, offset) },
-                        onDrag = onDrag,
-                        onDragEnd = onDragEnd,
-                        onEditClick = { onEditTaskClick(task) },
-                        onDeleteClick = { onDeleteTaskClick(task.id) },
-                        onToggleCompleted = { onToggleCompleted(task) }
-                    )
+                            task = task,
+                            categories = categories,
+                            viewModel = viewModel,
+                            commentsCount = taskCommentsCount,
+                            isInProgress = activeInProgressTaskId == task.id,
+                            isHighlighted = highlightedTaskId == task.id,
+                            isAnyTaskInProgress = activeInProgressTaskId != null,
+                            isDragging = draggedTaskId == task.id,
+                            relatedBoards = relatedBoards,
+                            onOpenRelatedBoard = onOpenBoard,
+                            onRemoveFromBoard = if (relatedBoards.isNotEmpty()) {
+                                {
+                                    viewModel.removeTaskFromBoard(task, currentBoardId)
+                                    Toast.makeText(context, s.taskRemovedFromBoard, Toast.LENGTH_SHORT).show()
+                                }
+                            } else null,
+                            onSetQuadrant = { q ->
+                                viewModel.setTaskQuadrant(task, q)
+                                val msg = if (q != null) {
+                                    s.addedToMatrix(q)
+                                } else {
+                                    s.removedFromMatrix
+                                }
+                                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                            },
+                            onToggleInProgress = { onToggleInProgress(task) },
+                            onCommentClick = { onCommentClick(task) },
+                            onMoveClick = { onMoveTaskClick(task) },
+                            reportPosition = reportPositions,
+                            onPositioned = { rect -> onTaskPositioned(task, rect) },
+                            onDragStart = { offset -> onDragStart(task, offset) },
+                            onDrag = onDrag,
+                            onDragEnd = onDragEnd,
+                            onEditClick = { onEditTaskClick(task) },
+                            onDeleteClick = { onDeleteTaskClick(task.id) },
+                            onToggleCompleted = { onToggleCompleted(task) },
+                            actionsRevealToken = actionsRevealEpoch.get()
+                        )
+                    }
                     }
                 }
-                if (dropInsertIndex != null && dropInsertIndex >= visibleActiveTasks.count { it.id != draggedTaskId }) {
+                if (!useLiteCards && insertIndex != null && insertIndex >= visibleActiveTasks.count { it.id != draggedTaskId }) {
                     item(key = "drop-slot-end") {
-                        DropInsertSlot(isCompact = isCompactMode)
+                        DropInsertSlot()
                     }
                 }
 
                 if (completedTasks.isNotEmpty()) {
+                    if (useLiteCards) {
+                        item(key = "completed-lite") {
+                            Text(
+                                text = s.completedCount(completedTasks.size),
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                            )
+                        }
+                    } else {
                     item {
                         Spacer(modifier = Modifier.height(8.dp))
                         Card(
@@ -3796,7 +3651,6 @@ fun ColumnItem(
                                 commentsCount = taskCommentsCount,
                                 isInProgress = false,
                                 isAnyTaskInProgress = activeInProgressTaskId != null,
-                                isCompact = isCompactMode,
                                 relatedBoards = relatedBoards,
                                 onOpenRelatedBoard = onOpenBoard,
                                 onSetQuadrant = { q ->
@@ -3809,20 +3663,6 @@ fun ColumnItem(
                                     Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                                 },
                                 onToggleInProgress = {},
-                                prevColumnTitle = prevColumn?.title,
-                                nextColumnTitle = nextColumn?.title,
-                                onQuickMovePrev = if (prevColumn != null && onQuickMoveTask != null) {
-                                    {
-                                        onQuickMoveTask(task, prevColumn.id)
-                                        Toast.makeText(context, s.movedToHub(s.localized(prevColumn.title)), Toast.LENGTH_SHORT).show()
-                                    }
-                                } else null,
-                                onQuickMoveNext = if (nextColumn != null && onQuickMoveTask != null) {
-                                    {
-                                        onQuickMoveTask(task, nextColumn.id)
-                                        Toast.makeText(context, s.movedToHub(s.localized(nextColumn.title)), Toast.LENGTH_SHORT).show()
-                                    }
-                                } else null,
                                 onCommentClick = { onCommentClick(task) },
                                 onMoveClick = { onMoveTaskClick(task) },
                                 reportPosition = reportPositions,
@@ -3835,6 +3675,7 @@ fun ColumnItem(
                                 onToggleCompleted = { onToggleCompleted(task) }
                             )
                         }
+                    }
                     }
                 }
             }
@@ -3882,17 +3723,12 @@ fun TaskCard(
     isHighlighted: Boolean = false,
     isAnyTaskInProgress: Boolean = false,
     isDragging: Boolean = false,
-    isCompact: Boolean = false,
     isDragPreview: Boolean = false,
     relatedBoards: List<RelatedBoardLink> = emptyList(),
     onOpenRelatedBoard: (boardId: String, columnId: String) -> Unit = { _, _ -> },
     onRemoveFromBoard: (() -> Unit)? = null,
     onSetQuadrant: ((String?) -> Unit)? = null,
     onToggleInProgress: () -> Unit = {},
-    prevColumnTitle: String? = null,
-    nextColumnTitle: String? = null,
-    onQuickMovePrev: (() -> Unit)? = null,
-    onQuickMoveNext: (() -> Unit)? = null,
     onCommentClick: () -> Unit = {},
     onMoveClick: () -> Unit = {},
     reportPosition: Boolean = false,
@@ -3902,7 +3738,9 @@ fun TaskCard(
     onDragEnd: () -> Unit,
     onEditClick: () -> Unit,
     onDeleteClick: () -> Unit,
-    onToggleCompleted: (() -> Unit)? = null
+    onToggleCompleted: (() -> Unit)? = null,
+    /** When > 0 after lite→full settle, actions slide in from the right inside a reserved slot. */
+    actionsRevealToken: Int = 0
 ) {
     val context = LocalContext.current
     val s = LocalAppStrings.current
@@ -3910,7 +3748,6 @@ fun TaskCard(
     val category = remember(categories, task.categoryId) {
         categories.find { it.id == task.categoryId }
     }
-    val hasStatus = category != null && !KanbanNames.isUncategorized(category.name)
 
     val toggleCompleted = {
         onToggleCompleted?.invoke() ?: viewModel.toggleTaskCompletion(task)
@@ -3923,21 +3760,24 @@ fun TaskCard(
         else -> 1f
     }
 
+    var moreMenuExpanded by remember(task.id) { mutableStateOf(false) }
+    // token > 0: start fully off-screen (clipped), then slide R→L. token == 0: already settled, show.
+    val actionsReveal = remember(task.id, actionsRevealToken) {
+        Animatable(if (actionsRevealToken > 0) 0f else 1f)
+    }
     val density = LocalDensity.current
-    var swipeOffsetX by remember(task.id) { mutableFloatStateOf(0f) }
-    var cardWidthPx by remember(task.id) { mutableFloatStateOf(0f) }
-    var showSwipeMoreMenu by remember(task.id) { mutableStateOf(false) }
-    // Two full buttons: More · Delete
-    val actionsWidthPx = with(density) { (44.dp * 2 + 8.dp * 1 + 8.dp).toPx() }
-    val peekPx = with(density) { 56.dp.toPx() }
-    val maxSwipePx = remember(actionsWidthPx, cardWidthPx, peekPx) {
-        if (cardWidthPx <= 0f) {
-            actionsWidthPx
+    val actionsSlidePx = with(density) { TaskActionsClusterWidth.toPx() }
+    LaunchedEffect(task.id, actionsRevealToken) {
+        if (actionsRevealToken > 0) {
+            actionsReveal.snapTo(0f)
+            actionsReveal.animateTo(
+                1f,
+                animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing)
+            )
         } else {
-            minOf(actionsWidthPx, (cardWidthPx - peekPx).coerceAtLeast(0f))
+            actionsReveal.snapTo(1f)
         }
     }
-    // LayoutCoordinates ref — no Compose state writes during hub swipe (avoids card recomposition).
     val layoutCoordsRef = remember {
         object {
             var coords: androidx.compose.ui.layout.LayoutCoordinates? = null
@@ -3995,16 +3835,23 @@ fun TaskCard(
         }
     }
 
-    Box(
+    val compactEisenhower = !task.isCompleted && task.eisenhowerQuadrant != null
+    val compactOnColor = if (compactEisenhower) {
+        eisenhowerOnColor(task.eisenhowerQuadrant)
+    } else if (task.isCompleted) {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    } else {
+        MaterialTheme.colorScheme.onSurface
+    }
+    val compactOverdue = !task.isCompleted && task.dueDate != null && task.dueDate.isOverdueDate()
+
+    // Title + reserved trailing slot (actions + ⋮). Settle: load in place, then slide R→L inside slot.
+    Card(
         modifier = modifier
             .fillMaxWidth()
-            .clipToBounds()
             .graphicsLayer { alpha = targetAlpha }
-            .onSizeChanged { cardWidthPx = it.width.toFloat() }
             .onGloballyPositioned { coordinates ->
                 layoutCoordsRef.coords = coordinates
-                // Always refresh parent hit-maps when requested. Writing into mutableMap
-                // (not Compose state) so hub swipes don't recompose every TaskCard.
                 if (reportPosition) {
                     onPositioned(
                         androidx.compose.ui.geometry.Rect(
@@ -4018,925 +3865,389 @@ fun TaskCard(
                 }
             }
             .then(
-                if (isDragPreview) Modifier else Modifier.pointerInput(task.id, maxSwipePx) {
-                    detectHorizontalDragGestures(
-                        onDragStart = {},
-                        onHorizontalDrag = { change, dragAmount ->
-                            change.consume()
-                            swipeOffsetX = (swipeOffsetX + dragAmount).coerceIn(-maxSwipePx, 0f)
-                        },
-                        onDragEnd = {
-                            swipeOffsetX = if (swipeOffsetX < -maxSwipePx * 0.35f) -maxSwipePx else 0f
-                        },
-                        onDragCancel = {
-                            swipeOffsetX = 0f
-                        }
-                    )
-                }
-            )
-    ) {
-        // Primary swipe actions — always fully visible; extras live under "More"
-        Row(
-            modifier = Modifier
-                .align(Alignment.CenterEnd)
-                .padding(end = 4.dp)
-                .graphicsLayer {
-                    alpha = ((-swipeOffsetX) / 30f).coerceIn(0f, 1f)
-                },
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Box {
-                Box(
-                    modifier = Modifier
-                        .size(44.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(MaterialTheme.colorScheme.secondaryContainer)
-                        .clickable { showSwipeMoreMenu = true },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.MoreVert,
-                        contentDescription = s.moreActions,
-                        modifier = Modifier.size(22.dp),
-                        tint = MaterialTheme.colorScheme.onSecondaryContainer
-                    )
-                }
-                DropdownMenu(
-                    expanded = showSwipeMoreMenu,
-                    onDismissRequest = { showSwipeMoreMenu = false }
-                ) {
-                    DropdownMenuItem(
-                        text = {
-                            Text(
-                                if (commentsCount > 0) s.commentsCount(commentsCount) else s.comments,
-                                style = MaterialTheme.typography.bodyLarge
-                            )
-                        },
-                        onClick = {
-                            showSwipeMoreMenu = false
-                            swipeOffsetX = 0f
-                            onCommentClick()
-                        },
-                        leadingIcon = {
-                            Icon(Icons.AutoMirrored.Filled.Comment, contentDescription = null)
-                        }
-                    )
-                    DropdownMenuItem(
-                        text = { Text(s.edit, style = MaterialTheme.typography.bodyLarge) },
-                        onClick = {
-                            showSwipeMoreMenu = false
-                            swipeOffsetX = 0f
-                            onEditClick()
-                        },
-                        leadingIcon = {
-                            Icon(Icons.Default.Edit, contentDescription = null)
-                        }
-                    )
-                    DropdownMenuItem(
-                        text = {
-                            Text(
-                                if (task.isHidden) s.showTask else s.hideTask,
-                                style = MaterialTheme.typography.bodyLarge
-                            )
-                        },
-                        onClick = {
-                            showSwipeMoreMenu = false
-                            swipeOffsetX = 0f
-                            viewModel.toggleTaskHidden(task)
-                        },
-                        leadingIcon = {
-                            Icon(
-                                if (task.isHidden) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                                contentDescription = null
-                            )
-                        }
-                    )
-                    if (task.dueDate != null) {
-                        val prefs = remember { KairosPreferences(context) }
-                        val defaultClock = DueReminderScheduler.formatClock(
-                            prefs.reminderHour,
-                            prefs.reminderMinute
-                        )
-                        val reminderLabel = task.reminderMinutesOfDay?.let {
-                            s.reminderCustom(DueReminderScheduler.formatMinutesOfDay(it))
-                        } ?: s.reminderAt(defaultClock)
-                        DropdownMenuItem(
-                            text = {
-                                Text(reminderLabel, style = MaterialTheme.typography.bodyLarge)
+                if (isDragPreview || isDragging) Modifier else Modifier
+                    .pointerInput(task.id) {
+                        detectDragGesturesAfterLongPress(
+                            onDragStart = { localOffset ->
+                                moreMenuExpanded = false
+                                onDragStart(
+                                    (layoutCoordsRef.coords?.positionInRoot() ?: Offset.Zero) + localOffset
+                                )
                             },
-                            onClick = {
-                                showSwipeMoreMenu = false
-                                swipeOffsetX = 0f
-                                android.app.AlertDialog.Builder(context)
-                                    .setTitle(s.reminderTaskTime)
-                                    .setItems(
-                                        arrayOf(
-                                            "${s.reminderUseDefault} ($defaultClock)",
-                                            s.reminderPickTime
-                                        )
-                                    ) { _, which ->
-                                        when (which) {
-                                            0 -> viewModel.updateTask(task.copy(reminderMinutesOfDay = null))
-                                            1 -> {
-                                                val initial = task.reminderMinutesOfDay
-                                                    ?: (prefs.reminderHour * 60 + prefs.reminderMinute)
-                                                android.app.TimePickerDialog(
-                                                    context,
-                                                    { _, hour, minute ->
-                                                        viewModel.updateTask(
-                                                            task.copy(reminderMinutesOfDay = hour * 60 + minute)
-                                                        )
-                                                    },
-                                                    initial / 60,
-                                                    initial % 60,
-                                                    true
-                                                ).show()
-                                            }
-                                        }
-                                    }
-                                    .show()
+                            onDrag = { change, dragAmount ->
+                                change.consume()
+                                onDrag(dragAmount)
                             },
-                            leadingIcon = {
-                                Icon(Icons.Default.Schedule, contentDescription = null)
-                            }
+                            onDragEnd = { onDragEnd() },
+                            onDragCancel = {}
                         )
                     }
-                    if (relatedBoards.isNotEmpty()) {
-                        relatedBoards.forEach { link ->
+            )
+            .then(
+                if (compactEisenhower) {
+                    Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(eisenhowerGradient(task.eisenhowerQuadrant))
+                } else Modifier
+            ),
+        colors = CardDefaults.cardColors(
+            containerColor = when {
+                compactEisenhower -> Color.Transparent
+                task.isCompleted -> MaterialTheme.colorScheme.surfaceVariant
+                else -> MaterialTheme.colorScheme.surface
+            }
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = if (isInProgress) 6.dp else 0.dp),
+        border = when {
+            isHighlighted -> androidx.compose.foundation.BorderStroke(2.5.dp, MaterialTheme.colorScheme.tertiary)
+            isInProgress -> androidx.compose.foundation.BorderStroke(2.dp, inProgressGradient)
+            compactEisenhower -> androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.28f))
+            category != null && !KanbanNames.isUncategorized(category.name) ->
+                androidx.compose.foundation.BorderStroke(1.5.dp, Color(category.color).copy(alpha = 0.7f))
+            task.isCompleted ->
+                androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+            else ->
+                androidx.compose.foundation.BorderStroke(1.2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f))
+        },
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(
+                    if (compactEisenhower) Modifier.background(Color.Black.copy(alpha = 0.22f))
+                    else Modifier
+                )
+                .padding(
+                    start = 12.dp,
+                    end = 0.dp,
+                    top = TaskCardRowVerticalPad,
+                    bottom = TaskCardRowVerticalPad
+                )
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(TaskCardRowContentMinHeight),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(TaskRowTrailingGap)
+            ) {
+                var titleExpanded by remember(task.id) { mutableStateOf(false) }
+                var titleOverflows by remember(task.id, task.title) { mutableStateOf(false) }
+                if (compactOverdue) {
+                    Box(
+                        modifier = Modifier
+                            .width(3.dp)
+                            .height(40.dp)
+                            .clip(RoundedCornerShape(2.dp))
+                            .background(MaterialTheme.colorScheme.error)
+                    )
+                }
+                Text(
+                    text = task.title,
+                    style = MaterialTheme.typography.bodyLarge.copy(
+                        fontWeight = FontWeight.Normal,
+                        fontFamily = FontFamily.SansSerif,
+                        letterSpacing = 0.15.sp,
+                        lineHeight = 22.sp
+                    ),
+                    maxLines = if (titleExpanded) Int.MAX_VALUE else 2,
+                    overflow = TextOverflow.Ellipsis,
+                    textDecoration = if (task.isCompleted) TextDecoration.LineThrough else null,
+                    color = compactOnColor,
+                    onTextLayout = { result ->
+                        if (!titleExpanded) titleOverflows = result.hasVisualOverflow
+                    },
+                    modifier = Modifier
+                        .weight(1f)
+                        .pointerInput(task.id, titleOverflows, titleExpanded) {
+                            detectTapGestures(
+                                onTap = {
+                                    if (titleOverflows || titleExpanded) {
+                                        titleExpanded = !titleExpanded
+                                    }
+                                },
+                                onDoubleTap = { onMoveClick() }
+                            )
+                        }
+                )
+                if (!isDragPreview) {
+                    Box(
+                        modifier = Modifier
+                            .width(TaskActionsClusterWidth)
+                            .height(TaskActionButtonSize)
+                            .clipToBounds(),
+                        contentAlignment = Alignment.CenterEnd
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(TaskActionsClusterGap),
+                            modifier = Modifier.graphicsLayer {
+                                // Opaque but clipped while off to the right — no fade “pop”.
+                                translationX = (1f - actionsReveal.value) * actionsSlidePx
+                            }
+                        ) {
+                            if (!task.isCompleted) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(TaskActionButtonSize)
+                                        .clip(RoundedCornerShape(14.dp))
+                                        .then(
+                                            if (isInProgress) Modifier.background(inProgressGradient)
+                                            else if (compactEisenhower) Modifier
+                                                .background(Color.White.copy(alpha = 0.22f))
+                                                .border(1.2.dp, Color.White.copy(alpha = 0.8f), RoundedCornerShape(14.dp))
+                                            else Modifier
+                                                .background(MaterialTheme.colorScheme.surface)
+                                                .border(1.2.dp, inProgressColor.copy(alpha = 0.55f), RoundedCornerShape(14.dp))
+                                        )
+                                        .clickable { onToggleInProgress() },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Bolt,
+                                        contentDescription = s.inProgress,
+                                        modifier = Modifier.size(TaskActionIconSize),
+                                        tint = if (isInProgress || compactEisenhower) Color.White else inProgressColor
+                                    )
+                                }
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .size(TaskActionButtonSize)
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .then(
+                                        if (task.isCompleted) Modifier.background(Color(0xFF00C853))
+                                        else if (compactEisenhower) Modifier
+                                            .background(Color.White.copy(alpha = 0.22f))
+                                            .border(1.5.dp, Color.White.copy(alpha = 0.85f), RoundedCornerShape(14.dp))
+                                        else Modifier
+                                            .background(MaterialTheme.colorScheme.surface)
+                                            .border(1.5.dp, Color(0xFF00C853).copy(alpha = 0.8f), RoundedCornerShape(14.dp))
+                                    )
+                                    .clickable { toggleCompleted() },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = if (task.isCompleted) Icons.Filled.CheckCircle else Icons.Outlined.CheckCircle,
+                                    contentDescription = s.completed,
+                                    modifier = Modifier.size(TaskActionIconSize),
+                                    tint = when {
+                                        task.isCompleted -> Color.White
+                                        compactEisenhower -> Color.White
+                                        else -> Color(0xFF00C853)
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    Box(
+                        modifier = Modifier
+                            .width(AlignedMoreButtonSize)
+                            .height(TaskActionButtonSize),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        AlignedMoreMenuButton(
+                            expanded = moreMenuExpanded,
+                            onExpandedChange = { moreMenuExpanded = it },
+                            tint = if (compactEisenhower) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+                        ) {
                             DropdownMenuItem(
                                 text = {
                                     Text(
-                                        s.localized(link.board.name),
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
+                                        if (commentsCount > 0) s.commentsCount(commentsCount) else s.comments,
+                                        style = MaterialTheme.typography.bodyLarge
                                     )
                                 },
                                 onClick = {
-                                    showSwipeMoreMenu = false
-                                    swipeOffsetX = 0f
-                                    onOpenRelatedBoard(link.board.id, link.columnId)
+                                    moreMenuExpanded = false
+                                    onCommentClick()
                                 },
                                 leadingIcon = {
-                                    Icon(Icons.Default.Link, contentDescription = null)
+                                    Icon(Icons.AutoMirrored.Filled.Comment, contentDescription = null)
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text(s.edit, style = MaterialTheme.typography.bodyLarge) },
+                                onClick = {
+                                    moreMenuExpanded = false
+                                    onEditClick()
+                                },
+                                leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) }
+                            )
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        if (task.isHidden) s.showTask else s.hideTask,
+                                        style = MaterialTheme.typography.bodyLarge
+                                    )
+                                },
+                                onClick = {
+                                    moreMenuExpanded = false
+                                    viewModel.toggleTaskHidden(task)
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        if (task.isHidden) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                        contentDescription = null
+                                    )
+                                }
+                            )
+                            if (task.dueDate != null) {
+                                val prefs = remember { KairosPreferences(context) }
+                                val defaultClock = DueReminderScheduler.formatClock(
+                                    prefs.reminderHour,
+                                    prefs.reminderMinute
+                                )
+                                val reminderLabel = task.reminderMinutesOfDay?.let {
+                                    s.reminderCustom(DueReminderScheduler.formatMinutesOfDay(it))
+                                } ?: s.reminderAt(defaultClock)
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(reminderLabel, style = MaterialTheme.typography.bodyLarge)
+                                    },
+                                    onClick = {
+                                        moreMenuExpanded = false
+                                        android.app.AlertDialog.Builder(context)
+                                            .setTitle(s.reminderTaskTime)
+                                            .setItems(
+                                                arrayOf(
+                                                    "${s.reminderUseDefault} ($defaultClock)",
+                                                    s.reminderPickTime
+                                                )
+                                            ) { _, which ->
+                                                when (which) {
+                                                    0 -> viewModel.updateTask(task.copy(reminderMinutesOfDay = null))
+                                                    1 -> {
+                                                        val initial = task.reminderMinutesOfDay
+                                                            ?: (prefs.reminderHour * 60 + prefs.reminderMinute)
+                                                        android.app.TimePickerDialog(
+                                                            context,
+                                                            { _, hour, minute ->
+                                                                viewModel.updateTask(
+                                                                    task.copy(reminderMinutesOfDay = hour * 60 + minute)
+                                                                )
+                                                            },
+                                                            initial / 60,
+                                                            initial % 60,
+                                                            true
+                                                        ).show()
+                                                    }
+                                                }
+                                            }
+                                            .show()
+                                    },
+                                    leadingIcon = {
+                                        Icon(Icons.Default.Schedule, contentDescription = null)
+                                    }
+                                )
+                            }
+                            if (relatedBoards.isNotEmpty()) {
+                                relatedBoards.forEach { link ->
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                s.localized(link.board.name),
+                                                style = MaterialTheme.typography.bodyLarge,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        },
+                                        onClick = {
+                                            moreMenuExpanded = false
+                                            onOpenRelatedBoard(link.board.id, link.columnId)
+                                        },
+                                        leadingIcon = {
+                                            Icon(Icons.Default.Link, contentDescription = null)
+                                        }
+                                    )
+                                }
+                            }
+                            if (onRemoveFromBoard != null) {
+                                DropdownMenuItem(
+                                    text = { Text(s.removeFromThisBoard, style = MaterialTheme.typography.bodyLarge) },
+                                    onClick = {
+                                        moreMenuExpanded = false
+                                        onRemoveFromBoard()
+                                    },
+                                    leadingIcon = {
+                                        Icon(Icons.Default.LinkOff, contentDescription = null)
+                                    }
+                                )
+                            }
+                            DropdownMenuItem(
+                                text = { Text(s.moveTask, style = MaterialTheme.typography.bodyLarge) },
+                                onClick = {
+                                    moreMenuExpanded = false
+                                    onMoveClick()
+                                },
+                                leadingIcon = {
+                                    Icon(Icons.AutoMirrored.Filled.DriveFileMove, contentDescription = null)
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text(s.delete, style = MaterialTheme.typography.bodyLarge) },
+                                onClick = {
+                                    moreMenuExpanded = false
+                                    onDeleteClick()
+                                },
+                                leadingIcon = {
+                                    Icon(Icons.Default.Delete, contentDescription = null)
                                 }
                             )
                         }
                     }
-                    if (onRemoveFromBoard != null) {
-                        DropdownMenuItem(
-                            text = { Text(s.removeFromThisBoard, style = MaterialTheme.typography.bodyLarge) },
-                            onClick = {
-                                showSwipeMoreMenu = false
-                                swipeOffsetX = 0f
-                                onRemoveFromBoard()
-                            },
-                            leadingIcon = {
-                                Icon(Icons.Default.LinkOff, contentDescription = null)
-                            }
-                        )
-                    }
-                    DropdownMenuItem(
-                        text = { Text(s.moveTask, style = MaterialTheme.typography.bodyLarge) },
-                        onClick = {
-                            showSwipeMoreMenu = false
-                            swipeOffsetX = 0f
-                            onMoveClick()
-                        },
-                        leadingIcon = {
-                            Icon(Icons.AutoMirrored.Filled.DriveFileMove, contentDescription = null)
-                        }
-                    )
                 }
             }
-
-            Box(
-                modifier = Modifier
-                    .size(44.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(deleteButtonGradient)
-                    .clickable {
-                        swipeOffsetX = 0f
-                        onDeleteClick()
-                    },
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Delete,
-                    contentDescription = s.delete,
-                    modifier = Modifier.size(20.dp),
-                    tint = Color.White
-                )
-            }
-        }
-
-        if (isCompact) {
-            val compactEisenhower = !task.isCompleted && task.eisenhowerQuadrant != null
-            val compactOnColor = if (compactEisenhower) {
-                eisenhowerOnColor(task.eisenhowerQuadrant)
-            } else if (task.isCompleted) {
-                MaterialTheme.colorScheme.onSurfaceVariant
-            } else {
-                MaterialTheme.colorScheme.onSurface
-            }
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .offset { IntOffset(swipeOffsetX.roundToInt(), 0) }
-                    .then(
-                        if (isDragPreview) Modifier else Modifier
-                            .pointerInput(task.id) {
-                                detectDragGesturesAfterLongPress(
-                                    onDragStart = { localOffset ->
-                                        swipeOffsetX = 0f
-                                        onDragStart(
-                                            (layoutCoordsRef.coords?.positionInRoot() ?: Offset.Zero) + localOffset
-                                        )
-                                    },
-                                    onDrag = { change, dragAmount ->
-                                        change.consume()
-                                        onDrag(dragAmount)
-                                    },
-                                    // End = finger up (finish). Cancel = scroll disposed the
-                                    // source gesture — overlay keeps the drag alive.
-                                    onDragEnd = { onDragEnd() },
-                                    onDragCancel = {}
-                                )
-                            }
-                    )
-                    .then(
-                        if (compactEisenhower) {
-                            Modifier
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(eisenhowerGradient(task.eisenhowerQuadrant))
-                        } else Modifier
-                    ),
-                colors = CardDefaults.cardColors(
-                    containerColor = when {
-                        compactEisenhower -> Color.Transparent
-                        task.isCompleted -> MaterialTheme.colorScheme.surfaceVariant
-                        else -> MaterialTheme.colorScheme.surface
-                    }
-                ),
-                elevation = CardDefaults.cardElevation(defaultElevation = if (isInProgress) 6.dp else 0.dp),
-                border = when {
-                    isHighlighted -> androidx.compose.foundation.BorderStroke(2.5.dp, MaterialTheme.colorScheme.tertiary)
-                    isInProgress -> androidx.compose.foundation.BorderStroke(2.dp, inProgressGradient)
-                    compactEisenhower -> androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.28f))
-                    category != null && !KanbanNames.isUncategorized(category.name) ->
-                        androidx.compose.foundation.BorderStroke(1.5.dp, Color(category.color).copy(alpha = 0.7f))
-                    task.isCompleted ->
-                        androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
-                    else ->
-                        androidx.compose.foundation.BorderStroke(1.2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f))
-                },
-                shape = RoundedCornerShape(12.dp)
-            ) {
+            // Bottom strip under ⋮: related next to due (end). If no due, related takes that spot.
+            if (!isDragPreview && (task.dueDate != null || relatedBoards.isNotEmpty())) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .then(
-                            if (compactEisenhower) Modifier.background(Color.Black.copy(alpha = 0.22f))
-                            else Modifier
-                        )
-                        .padding(start = 12.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+                        .heightIn(min = TaskBottomMetaHeight)
+                        .padding(top = 2.dp, end = 2.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    var titleExpanded by remember(task.id) { mutableStateOf(false) }
-                    var titleOverflows by remember(task.id, task.title) { mutableStateOf(false) }
-                    val compactOverdue = !task.isCompleted && task.dueDate != null && task.dueDate.isOverdueDate()
-                    if (compactOverdue) {
-                        Box(
-                            modifier = Modifier
-                                .width(3.dp)
-                                .height(36.dp)
-                                .clip(RoundedCornerShape(2.dp))
-                                .background(MaterialTheme.colorScheme.error)
+                    Spacer(modifier = Modifier.weight(1f))
+                    if (relatedBoards.isNotEmpty()) {
+                        RelatedBoardsButton(
+                            links = relatedBoards,
+                            onOpen = { link -> onOpenRelatedBoard(link.board.id, link.columnId) },
+                            iconTint = if (compactEisenhower) {
+                                Color.White.copy(alpha = 0.92f)
+                            } else {
+                                MaterialTheme.colorScheme.onSecondaryContainer
+                            },
+                            background = if (compactEisenhower) {
+                                Color.White.copy(alpha = 0.22f)
+                            } else {
+                                MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.92f)
+                            },
+                            size = TaskRelatedCornerSize
                         )
                     }
-                    Text(
-                        text = task.title,
-                        style = MaterialTheme.typography.bodyLarge.copy(
-                            fontWeight = FontWeight.Normal,
-                            fontFamily = FontFamily.SansSerif,
-                            letterSpacing = 0.15.sp,
-                            lineHeight = 22.sp
-                        ),
-                        maxLines = if (titleExpanded) Int.MAX_VALUE else 2,
-                        overflow = TextOverflow.Ellipsis,
-                        textDecoration = if (task.isCompleted) TextDecoration.LineThrough else null,
-                        color = compactOnColor,
-                        onTextLayout = { result ->
-                            if (!titleExpanded) titleOverflows = result.hasVisualOverflow
-                        },
-                        modifier = Modifier
-                            .weight(1f)
-                            .pointerInput(task.id, titleOverflows, titleExpanded) {
-                                detectTapGestures(
-                                    onTap = {
-                                        if (swipeOffsetX < 0f) {
-                                            swipeOffsetX = 0f
-                                        } else if (titleOverflows || titleExpanded) {
-                                            titleExpanded = !titleExpanded
-                                        }
-                                    },
-                                    onDoubleTap = {
-                                        swipeOffsetX = 0f
-                                        onMoveClick()
-                                    }
-                                )
-                            }
-                    )
                     if (task.dueDate != null) {
                         Text(
                             text = task.dueDate.relativeDueLabel(s, dateLocale, task.isCompleted),
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Bold,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.End,
                             color = when {
                                 compactOverdue -> if (compactEisenhower) Color.White else MaterialTheme.colorScheme.error
-                                compactEisenhower -> Color.White.copy(alpha = 0.85f)
+                                compactEisenhower -> Color.White.copy(alpha = 0.9f)
                                 else -> MaterialTheme.colorScheme.onSurfaceVariant
                             },
                             maxLines = 1,
+                            softWrap = false,
                             overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.clickable { showDueEditor = true }
-                        )
-                    }
-                    if (relatedBoards.isNotEmpty()) {
-                        RelatedBoardsButton(
-                            links = relatedBoards,
-                            onOpen = { link -> onOpenRelatedBoard(link.board.id, link.columnId) },
-                            iconTint = if (compactEisenhower) Color.White else MaterialTheme.colorScheme.onSecondaryContainer,
-                            background = if (compactEisenhower) {
-                                Color.White.copy(alpha = 0.22f)
-                            } else {
-                                MaterialTheme.colorScheme.secondaryContainer
-                            },
-                            size = 36.dp
-                        )
-                    }
-                    if (!task.isCompleted) {
-                        Box(
                             modifier = Modifier
-                                .size(48.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .then(
-                                    if (isInProgress) Modifier.background(inProgressGradient)
-                                    else if (compactEisenhower) Modifier
-                                        .background(Color.White.copy(alpha = 0.22f))
-                                        .border(1.2.dp, Color.White.copy(alpha = 0.8f), RoundedCornerShape(12.dp))
-                                    else Modifier
-                                        .background(MaterialTheme.colorScheme.surface)
-                                        .border(1.2.dp, inProgressColor.copy(alpha = 0.55f), RoundedCornerShape(12.dp))
-                                )
-                                .clickable { onToggleInProgress() },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Bolt,
-                                contentDescription = s.inProgress,
-                                modifier = Modifier.size(24.dp),
-                                tint = if (isInProgress || compactEisenhower) Color.White else inProgressColor
-                            )
-                        }
-                    }
-                    Box(
-                        modifier = Modifier
-                            .size(48.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .then(
-                                if (task.isCompleted) Modifier.background(Color(0xFF00C853))
-                                else if (compactEisenhower) Modifier
-                                    .background(Color.White.copy(alpha = 0.22f))
-                                    .border(1.5.dp, Color.White.copy(alpha = 0.85f), RoundedCornerShape(12.dp))
-                                else Modifier
-                                    .background(MaterialTheme.colorScheme.surface)
-                                    .border(1.5.dp, Color(0xFF00C853).copy(alpha = 0.8f), RoundedCornerShape(12.dp))
-                            )
-                            .clickable { toggleCompleted() },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = if (task.isCompleted) Icons.Filled.CheckCircle else Icons.Outlined.CheckCircle,
-                            contentDescription = s.completed,
-                            modifier = Modifier.size(24.dp),
-                            tint = when {
-                                task.isCompleted -> Color.White
-                                compactEisenhower -> Color.White
-                                else -> Color(0xFF00C853)
-                            }
+                                .widthIn(min = AlignedMoreButtonSize, max = TaskDueLabelMaxWidth)
+                                .clickable { showDueEditor = true }
                         )
                     }
                 }
             }
-        } else {
-        // Foreground Card (solid opaque background prevents background buttons from showing through)
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .offset { IntOffset(swipeOffsetX.roundToInt(), 0) }
-                .then(
-                    if (isDragPreview) Modifier else Modifier
-                        .pointerInput(task.id) {
-                            detectDragGesturesAfterLongPress(
-                                onDragStart = { localOffset ->
-                                    swipeOffsetX = 0f
-                                    onDragStart(
-                                        (layoutCoordsRef.coords?.positionInRoot() ?: Offset.Zero) + localOffset
-                                    )
-                                },
-                                onDrag = { change, dragAmount ->
-                                    change.consume()
-                                    onDrag(dragAmount)
-                                },
-                                // End = finger up (finish). Cancel = scroll disposed the
-                                // source gesture — overlay keeps the drag alive.
-                                onDragEnd = { onDragEnd() },
-                                onDragCancel = {}
-                            )
-                        }
-                )
-                .clickable(enabled = !isDragPreview) {
-                    if (swipeOffsetX < 0f) {
-                        swipeOffsetX = 0f
-                    }
-                },
-            colors = CardDefaults.cardColors(
-                containerColor = if (task.isCompleted) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface
-            ),
-            elevation = CardDefaults.cardElevation(defaultElevation = if (isInProgress) 6.dp else 0.dp),
-            border = when {
-                isInProgress -> androidx.compose.foundation.BorderStroke(2.dp, inProgressGradient)
-                category != null && !KanbanNames.isUncategorized(category.name) -> 
-                    androidx.compose.foundation.BorderStroke(1.5.dp, Color(category.color).copy(alpha = 0.7f))
-                task.eisenhowerQuadrant != null ->
-                    androidx.compose.foundation.BorderStroke(1.5.dp, eisenhowerSolid(task.eisenhowerQuadrant).copy(alpha = 0.75f))
-                task.isCompleted -> 
-                    androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
-                else -> 
-                    androidx.compose.foundation.BorderStroke(1.2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f))
-            },
-            shape = RoundedCornerShape(12.dp)
-        ) {
-            androidx.compose.foundation.layout.Column(
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                // Main card body
-                androidx.compose.foundation.layout.Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(start = 14.dp, top = 12.dp, end = 12.dp, bottom = 12.dp)
-                ) {
-                    // Top row: Title + In-Progress indicator + subtle left swipe hint
-                    Row(
-                        verticalAlignment = Alignment.Top,
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        androidx.compose.foundation.layout.Column(
-                            modifier = Modifier.weight(1f).padding(end = 6.dp)
-                        ) {
-                            if (isInProgress) {
-                                Box(
-                                    modifier = Modifier
-                                        .padding(bottom = 6.dp)
-                                        .clip(RoundedCornerShape(6.dp))
-                                        .background(inProgressGradient)
-                                        .padding(horizontal = 8.dp, vertical = 3.dp)
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Bolt,
-                                            contentDescription = null,
-                                            tint = Color.White,
-                                            modifier = Modifier.size(14.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text(
-                                            text = s.nowInProgress,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            fontWeight = FontWeight.ExtraBold,
-                                            color = Color.White,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                            modifier = Modifier.weight(1f, fill = false)
-                                        )
-                                    }
-                                }
-                            }
-
-                            Text(
-                                text = task.title,
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = if (task.isCompleted) MaterialTheme.colorScheme.outlineVariant else MaterialTheme.colorScheme.onSurface,
-                                textDecoration = if (task.isCompleted) TextDecoration.LineThrough else TextDecoration.None,
-                                maxLines = 4,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-
-                        if (relatedBoards.isNotEmpty()) {
-                            RelatedBoardsButton(
-                                links = relatedBoards,
-                                onOpen = { link -> onOpenRelatedBoard(link.board.id, link.columnId) },
-                                iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
-                                background = MaterialTheme.colorScheme.secondaryContainer,
-                                size = 32.dp
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                        }
-
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
-                            contentDescription = s.swipeForActions,
-                            modifier = Modifier
-                                .size(16.dp)
-                                .padding(top = 2.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
-                        )
-                    }
-
-                // Completed timestamp
-                if (task.isCompleted) {
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Check,
-                            contentDescription = null,
-                            modifier = Modifier.size(15.dp),
-                            tint = Color(0xFF00C853)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        val closedText = if (task.completedAt != null) {
-                            s.closedAt(task.completedAt.formatDateTime(dateLocale))
-                        } else {
-                            s.completed
-                        }
-                        Text(
-                            text = closedText,
-                            style = MaterialTheme.typography.bodySmall,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f, fill = false)
-                        )
-                    }
-                }
-
-                // Metadata: Status (ONLY if specified!), Due date, Comments
-                if (hasStatus || task.dueDate != null || commentsCount > 0) {
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        // Status: "Если статус не указан то его не нужно отображать."
-                        if (category != null && !KanbanNames.isUncategorized(category.name)) {
-                            Surface(
-                                modifier = Modifier.weight(1f, fill = false).padding(end = 8.dp),
-                                shape = RoundedCornerShape(12.dp),
-                                color = Color(category.color).copy(alpha = 0.15f),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(category.color).copy(alpha = 0.5f))
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(8.dp)
-                                            .clip(CircleShape)
-                                            .background(getStatusBrush(category.color))
-                                    )
-                                    Spacer(modifier = Modifier.width(5.dp))
-                                    Text(
-                                        text = s.localized(category.name),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color(category.color),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.weight(1f, fill = false)
-                                    )
-                                }
-                            }
-                        } else {
-                            Spacer(modifier = Modifier.width(1.dp))
-                        }
-
-                        // Right side of metadata: Comments count & Due date
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            // Comments count badge if comments exist
-                            if (commentsCount > 0) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
-                                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.AutoMirrored.Filled.Comment,
-                                        contentDescription = s.comments,
-                                        modifier = Modifier.size(14.dp),
-                                        tint = MaterialTheme.colorScheme.primary
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text(
-                                        text = commentsCount.toString(),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
-                                }
-                            }
-
-                            // Due date
-                            if (task.dueDate != null) {
-                                val overdue = !task.isCompleted && task.dueDate.isOverdueDate()
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.clickable { showDueEditor = true }
-                                ) {
-                                    Icon(
-                                        Icons.Default.DateRange,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(16.dp),
-                                        tint = if (overdue) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text(
-                                        text = task.dueDate.relativeDueLabel(s, dateLocale, task.isCompleted),
-                                        style = MaterialTheme.typography.labelMedium,
-                                        fontWeight = FontWeight.Medium,
-                                        color = if (overdue) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                                        textDecoration = if (task.isCompleted) TextDecoration.LineThrough else TextDecoration.None,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // 1-Tap Eisenhower Matrix Quadrant Selector (only if enabled or assigned)
-                if (task.showEisenhowerButtons || task.eisenhowerQuadrant != null) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 10.dp, bottom = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Text(
-                            text = s.matrix,
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.widthIn(max = 72.dp)
-                        )
-
-                        val quadrants = listOf(
-                            Eisenhower.Q1 to "Q1",
-                            Eisenhower.Q2 to "Q2",
-                            Eisenhower.Q3 to "Q3",
-                            Eisenhower.Q4 to "Q4"
-                        )
-
-                        Row(
-                            modifier = Modifier.weight(1f),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            quadrants.forEach { (qKey, qLabel) ->
-                                val isSelected = task.eisenhowerQuadrant == qKey
-                                EisenhowerQuadrantChip(
-                                    qKey = qKey,
-                                    qLabel = qLabel,
-                                    isSelected = isSelected,
-                                    dimUnselected = task.eisenhowerQuadrant != null && !isSelected,
-                                    onClick = {
-                                        onSetQuadrant?.invoke(if (isSelected) null else qKey)
-                                    }
-                                )
-                            }
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // Ergonomic Thumb-Zone Action Buttons: "В работе" and "Выполнено"
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    if (!task.isCompleted) {
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(44.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .then(
-                                    if (isInProgress) Modifier.background(inProgressGradient)
-                                    else Modifier
-                                        .background(MaterialTheme.colorScheme.surface)
-                                        .border(1.2.dp, inProgressColor.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
-                                )
-                                .clickable { onToggleInProgress() }
-                                .padding(horizontal = 8.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center,
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Bolt,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp),
-                                    tint = if (isInProgress) Color.White else inProgressColor
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = s.inProgress,
-                                    fontWeight = FontWeight.Bold,
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = if (isInProgress) Color.White else inProgressColor,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.weight(1f, fill = false)
-                                )
-                            }
-                        }
-                    }
-
-                    // "Выполнено" button (at the bottom, ultra accessible for thumb!)
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(44.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .then(
-                                if (task.isCompleted) Modifier.background(Color(0xFF00C853))
-                                else Modifier
-                                    .background(MaterialTheme.colorScheme.surface)
-                                    .border(1.5.dp, Color(0xFF00C853).copy(alpha = 0.8f), RoundedCornerShape(10.dp))
-                            )
-                            .clickable { toggleCompleted() }
-                            .padding(horizontal = 8.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Icon(
-                                imageVector = if (task.isCompleted) Icons.Filled.CheckCircle else Icons.Outlined.CheckCircle,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp),
-                                tint = if (task.isCompleted) Color.White else Color(0xFF00C853)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = s.completed,
-                                fontWeight = FontWeight.Bold,
-                                style = MaterialTheme.typography.labelMedium,
-                                color = if (task.isCompleted) Color.White else Color(0xFF00C853),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f, fill = false)
-                            )
-                        }
-                    }
-                }
-            }
-
-            // Move Hub/Board Footer: Segmented full-width bar without empty voids or overflowing text
-            HorizontalDivider(
-                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
-                thickness = 0.8.dp
-            )
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // 1. Move to Previous Hub (Left chevron)
-                val hasPrev = onQuickMovePrev != null
-                Surface(
-                    onClick = onQuickMovePrev ?: {},
-                    enabled = hasPrev,
-                    shape = RoundedCornerShape(8.dp),
-                    color = if (hasPrev) MaterialTheme.colorScheme.primary.copy(alpha = 0.08f) else MaterialTheme.colorScheme.surface.copy(alpha = 0.25f),
-                    border = androidx.compose.foundation.BorderStroke(
-                        1.2.dp,
-                        if (hasPrev) MaterialTheme.colorScheme.primary.copy(alpha = 0.5f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)
-                    ),
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(36.dp)
-                ) {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
-                            contentDescription = if (prevColumnTitle != null) s.toHub(s.localized(prevColumnTitle)) else s.previousHub,
-                            modifier = Modifier.size(22.dp),
-                            tint = if (hasPrev) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f)
-                        )
-                    }
-                }
-
-                // 2. Change Hub / Board (Center prominent button)
-                Surface(
-                    onClick = onMoveClick,
-                    shape = RoundedCornerShape(8.dp),
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
-                    border = androidx.compose.foundation.BorderStroke(1.2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)),
-                    modifier = Modifier
-                        .weight(1.8f)
-                        .height(36.dp)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(horizontal = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.DriveFileMove,
-                            contentDescription = s.changeHubBoard,
-                            modifier = Modifier.size(17.dp),
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = s.changeHub,
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f, fill = false)
-                        )
-                    }
-                }
-
-                // 3. Move to Next Hub (Right chevron)
-                val hasNext = onQuickMoveNext != null
-                Surface(
-                    onClick = onQuickMoveNext ?: {},
-                    enabled = hasNext,
-                    shape = RoundedCornerShape(8.dp),
-                    color = if (hasNext) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface.copy(alpha = 0.25f),
-                    border = androidx.compose.foundation.BorderStroke(
-                        1.2.dp,
-                        if (hasNext) MaterialTheme.colorScheme.primary.copy(alpha = 0.6f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)
-                    ),
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(36.dp)
-                ) {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                            contentDescription = if (nextColumnTitle != null) s.toHub(s.localized(nextColumnTitle)) else s.nextHub,
-                            modifier = Modifier.size(22.dp),
-                            tint = if (hasNext) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f)
-                        )
-                    }
-                }
-            }
-        }
-        }
         }
     }
 }
@@ -5807,12 +5118,136 @@ fun ReorderColumnsDialog(
     )
 }
 
+/**
+ * Shared ⋮ control for board / hub / task.
+ * Button slot is always [AlignedMoreButtonSize]; popup is end-aligned to that slot so every
+ * open menu shares the same trailing X (stacked under each other).
+ */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun DropInsertSlot(isCompact: Boolean) {
+private fun AlignedMoreMenuButton(
+    expanded: Boolean,
+    onExpandedChange: (Boolean) -> Unit,
+    tint: Color = MaterialTheme.colorScheme.onSurfaceVariant,
+    /** If set, short tap runs this instead of opening the menu. */
+    onClick: (() -> Unit)? = null,
+    /** Optional long-press (e.g. open menu while short tap expands a cluster). */
+    onLongClick: (() -> Unit)? = null,
+    content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit
+) {
+    val s = LocalAppStrings.current
+    val density = LocalDensity.current
+    val positionProvider = remember(density) {
+        EndAlignedMenuPositionProvider(density)
+    }
+    Box(modifier = Modifier.size(AlignedMoreButtonSize)) {
+        val openMenu = { onExpandedChange(true) }
+        Box(
+            modifier = Modifier
+                .size(AlignedMoreButtonSize)
+                .then(
+                    if (onLongClick != null) {
+                        Modifier.combinedClickable(
+                            onClick = { onClick?.invoke() ?: openMenu() },
+                            onLongClick = onLongClick
+                        )
+                    } else {
+                        Modifier.clickable { onClick?.invoke() ?: openMenu() }
+                    }
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.MoreVert,
+                contentDescription = s.moreActions,
+                tint = tint,
+                modifier = Modifier.size(AlignedMoreIconSize)
+            )
+        }
+        if (expanded) {
+            Popup(
+                popupPositionProvider = positionProvider,
+                onDismissRequest = { onExpandedChange(false) },
+                properties = PopupProperties(focusable = true)
+            ) {
+                Surface(
+                    shape = MaterialTheme.shapes.extraSmall,
+                    tonalElevation = 3.dp,
+                    shadowElevation = 3.dp,
+                    modifier = Modifier.width(AlignedMoreMenuWidth)
+                ) {
+                    Column(modifier = Modifier.padding(vertical = 8.dp)) {
+                        content()
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Pins menu's right edge to the ⋮ button's right edge. */
+private class EndAlignedMenuPositionProvider(
+    private val density: androidx.compose.ui.unit.Density
+) : PopupPositionProvider {
+    override fun calculatePosition(
+        anchorBounds: IntRect,
+        windowSize: IntSize,
+        layoutDirection: LayoutDirection,
+        popupContentSize: IntSize
+    ): IntOffset {
+        val x = anchorBounds.right - popupContentSize.width
+        val y = anchorBounds.bottom + with(density) { AlignedMoreMenuGap.toPx() }.roundToInt()
+        return IntOffset(x, y)
+    }
+}
+
+/** Matches Material3 TopAppBar actions end padding and hub page side inset. */
+private val AlignedMoreEdgeGutter = 4.dp
+private val AlignedMoreButtonSize = 48.dp
+private val AlignedMoreIconSize = 26.dp
+private val AlignedMoreMenuWidth = 280.dp
+private val AlignedMoreMenuGap = 0.dp
+/** Task card quick-actions (bolt / check) — Material min touch target. */
+private val TaskActionButtonSize = 48.dp
+private val TaskActionIconSize = 26.dp
+private val TaskActionsClusterGap = 4.dp
+/** Always reserved for bolt+check so title width matches lite peek and settle fade. */
+private val TaskActionsClusterWidth = TaskActionButtonSize * 2 + TaskActionsClusterGap
+/** Gap between title / actions / ⋮ in TaskCard Row (Arrangement.spacedBy). */
+private val TaskRowTrailingGap = 6.dp
+/** Due / related bottom meta strip height (fits link badge + labelSmall). */
+private val TaskDueUnderMoreHeight = 16.dp
+private val TaskBottomMetaHeight = 22.dp
+/** Equal top/bottom pad around the button row. */
+private val TaskCardRowVerticalPad = 6.dp
+/** Content row height = action buttons exactly. */
+private val TaskCardRowContentMinHeight = TaskActionButtonSize
+/** Due label may be wider than ⋮ so text is not ellipsized away. */
+private val TaskDueLabelMaxWidth = 72.dp
+/** Related-board control in the bottom meta strip (does not shift title). */
+private val TaskRelatedCornerSize = 22.dp
+
+/** Empty trailing slots matching TaskCard actions + ⋮ (same Row spacedBy). */
+@Composable
+private fun TaskTrailingWidthReserve() {
+    Box(
+        modifier = Modifier
+            .width(TaskActionsClusterWidth)
+            .height(TaskActionButtonSize)
+    )
+    Box(
+        modifier = Modifier
+            .width(AlignedMoreButtonSize)
+            .height(TaskActionButtonSize)
+    )
+}
+
+@Composable
+private fun DropInsertSlot() {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(if (isCompact) 56.dp else 84.dp)
+            .height(56.dp)
             .border(
                 2.dp,
                 MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),
@@ -5823,6 +5258,145 @@ private fun DropInsertSlot(isCompact: Boolean) {
                 RoundedCornerShape(12.dp)
             )
     )
+}
+
+/** Peek stand-in for TaskCard — same trailing width and equal vertical pad as settled chrome. */
+@Composable
+private fun LiteTaskRow(
+    title: String,
+    eisenhowerQuadrant: String? = null,
+    categoryColor: Color? = null,
+    isOverdue: Boolean = false,
+    isInProgress: Boolean = false,
+    isCompleted: Boolean = false,
+    hasDueDate: Boolean = false,
+    hasRelated: Boolean = false
+) {
+    val painted = !isCompleted && eisenhowerQuadrant != null
+    val onColor = when {
+        painted -> eisenhowerOnColor(eisenhowerQuadrant)
+        isCompleted -> MaterialTheme.colorScheme.onSurfaceVariant
+        else -> MaterialTheme.colorScheme.onSurface
+    }
+    val borderColor = when {
+        isInProgress -> inProgressColor
+        painted -> Color.White.copy(alpha = 0.28f)
+        categoryColor != null -> categoryColor.copy(alpha = 0.7f)
+        isCompleted -> MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+        else -> MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .then(
+                if (painted) Modifier.background(eisenhowerGradient(eisenhowerQuadrant))
+                else Modifier.background(
+                    if (isCompleted) MaterialTheme.colorScheme.surfaceVariant
+                    else MaterialTheme.colorScheme.surface
+                )
+            )
+            .border(
+                width = if (isInProgress) 2.dp else 1.2.dp,
+                color = borderColor,
+                shape = RoundedCornerShape(12.dp)
+            )
+            .then(
+                if (painted) Modifier.background(Color.Black.copy(alpha = 0.18f))
+                else Modifier
+            )
+            .padding(
+                start = 12.dp,
+                end = 0.dp,
+                top = TaskCardRowVerticalPad,
+                bottom = TaskCardRowVerticalPad
+            )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(TaskCardRowContentMinHeight),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(TaskRowTrailingGap)
+        ) {
+            if (isOverdue) {
+                Box(
+                    modifier = Modifier
+                        .width(3.dp)
+                        .height(40.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(MaterialTheme.colorScheme.error)
+                )
+            }
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyLarge.copy(
+                    fontWeight = FontWeight.Normal,
+                    fontFamily = FontFamily.SansSerif,
+                    letterSpacing = 0.15.sp,
+                    lineHeight = 22.sp
+                ),
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                color = onColor.copy(alpha = if (isCompleted) 0.55f else 1f),
+                textDecoration = if (isCompleted) TextDecoration.LineThrough else null,
+                modifier = Modifier.weight(1f)
+            )
+            // Same two slots as TaskCard (actions cluster + ⋮) so title width never jumps.
+            TaskTrailingWidthReserve()
+        }
+        if (hasDueDate || hasRelated) {
+            Spacer(modifier = Modifier.height(TaskBottomMetaHeight + 2.dp))
+        }
+    }
+}
+
+/** Drag preview without TaskCard swipe/menus — keeps the 60fps ghost cheap. */
+@Composable
+private fun DragGhostCard(
+    title: String,
+    eisenhowerQuadrant: String?,
+    isCompleted: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val painted = !isCompleted && eisenhowerQuadrant != null
+    Card(
+        modifier = modifier.then(
+            if (painted) {
+                Modifier
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(eisenhowerGradient(eisenhowerQuadrant))
+            } else Modifier
+        ),
+        colors = CardDefaults.cardColors(
+            containerColor = when {
+                painted -> Color.Transparent
+                isCompleted -> MaterialTheme.colorScheme.surfaceVariant
+                else -> MaterialTheme.colorScheme.surface
+            }
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        border = androidx.compose.foundation.BorderStroke(
+            1.2.dp,
+            if (painted) Color.White.copy(alpha = 0.28f)
+            else MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)
+        ),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.bodyLarge,
+            fontWeight = FontWeight.Medium,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            color = if (painted) eisenhowerOnColor(eisenhowerQuadrant) else MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(if (painted) Modifier.background(Color.Black.copy(alpha = 0.22f)) else Modifier)
+                .padding(horizontal = 12.dp, vertical = 10.dp)
+        )
+    }
 }
 
 @Composable

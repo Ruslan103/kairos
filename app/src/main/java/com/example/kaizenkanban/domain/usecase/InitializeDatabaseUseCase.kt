@@ -16,6 +16,20 @@ class InitializeDatabaseUseCase(
     private val prefs: KairosPreferences? = null
 ) {
     suspend operator fun invoke() {
+        // Warm start: skip emoji renames, hub remaps, and comment backfills when already seeded.
+        if (prefs != null && prefs.dbSeedVersion >= SEED_VERSION) {
+            val projects = repository.getProjects().first()
+            val hasBoards = prefs.okrBoardId != null && prefs.eisenhowerBoardId != null
+            if (projects.isNotEmpty() && hasBoards && repository.getCategoriesCount() > 0) {
+                return
+            }
+        }
+
+        runFullSeed()
+        prefs?.dbSeedVersion = SEED_VERSION
+    }
+
+    private suspend fun runFullSeed() {
         var projects = repository.getProjects().first()
         if (projects.isEmpty()) {
             val defaultProject = Project(id = UUID.randomUUID().toString(), name = "Kairos", position = 0)
@@ -199,6 +213,11 @@ class InitializeDatabaseUseCase(
                 }
             }
         }
+    }
+
+    companion object {
+        /** Increment when seed/migration steps above change and must re-run once. */
+        const val SEED_VERSION = 1
     }
 
     private fun findOkrBoard(boards: List<Board>, columns: List<Column>): Board? {

@@ -59,7 +59,7 @@ class KanbanRepositoryImpl(
     }
     override suspend fun renameBoard(boardId: String, newName: String) = dao.renameBoard(boardId, newName)
     
-    override suspend fun setDefaultBoard(boardId: String) {
+    override suspend fun setDefaultBoard(boardId: String) = transactional {
         dao.clearDefaultBoards()
         dao.setDefaultBoard(boardId)
     }

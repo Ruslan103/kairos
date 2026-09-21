@@ -70,16 +70,6 @@ val deleteButtonGradient = Brush.linearGradient(
 
 val deleteButtonColor = Color(0xFFE1306C)
 
-// Sunset gradient for mode switch
-val modeSwitchGradient = Brush.linearGradient(
-    colors = listOf(
-        Color(0xFFF58529),
-        Color(0xFFDD2A7B),
-        Color(0xFF8134AF),
-        Color(0xFF515BD4)
-    )
-)
-
 // Helper to generate a smooth, vibrant gradient for each status
 fun getStatusBrush(colorLong: Long): Brush {
     val base = Color(colorLong)

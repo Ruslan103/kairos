@@ -168,13 +168,13 @@ class AppStrings(private val appLanguage: AppLanguage) {
     val hiddenTasksBadge get() = t("Hidden", "Скрытые")
     val onboardingTitle4 get() = t("Swipe & hide", "Свайп и скрытие")
     val onboardingText4 get() = t(
-        "Swipe a card left for More and Delete. Hide clutter via More; tap the eye on a hub to show hidden again.",
-        "Свайп влево — Ещё и Удалить. Скрыть задачу можно в Ещё; глаз на хабе снова показывает скрытые."
+        "Use the ⋮ menu on the board, hub, and each task for actions.",
+        "Действия — через меню ⋮ у доски, хаба и каждой задачи."
     )
     val onboardingTitle5 get() = t("Eisenhower colors", "Цвета Эйзенхауэра")
     val onboardingText5 get() = t(
-        "Q1–Q4 buttons paint the task. Compact mode fills the card in that color.",
-        "Кнопки Q1–Q4 красят задачу. В компактном режиме карточка заливается этим цветом."
+        "Q1–Q4 buttons paint the task. The card fills with that color.",
+        "Кнопки Q1–Q4 красят задачу. Карточка заливается этим цветом."
     )
     val board get() = t("Board", "Доска")
     val hideBoardsList get() = t("Hide board list", "Скрыть список досок")
@@ -189,8 +189,6 @@ class AppStrings(private val appLanguage: AppLanguage) {
     val projects get() = t("Projects", "Проекты")
     val setPrimaryHub get() = t("Set as primary hub", "Сделать основным хабом")
     val primaryHub get() = t("Primary hub", "Основной хаб")
-    val executionMode get() = t("Execution mode", "Режим исполнения")
-    val planningMode get() = t("Planning mode", "Режим планирования")
     val addTask get() = t("Add task", "Добавить задачу")
     val newHub get() = t("New hub", "Новый хаб")
     val newTask get() = t("New task", "Новая задача")
@@ -357,8 +355,8 @@ class AppStrings(private val appLanguage: AppLanguage) {
     val onboardingDone get() = t("Got it", "Понятно")
     val onboardingTitle1 get() = t("Boards & hubs", "Доски и хабы")
     val onboardingText1 get() = t(
-        "Double-tap the board name to open all projects. Pull the hub title down for menus, up to hide them. Star a primary hub in More. Hubs swipe as a carousel.",
-        "Двойной тап по названию доски — все проекты. Тяни заголовок хаба вниз — меню и списки, вверх — скрыть. Основной хаб — в Ещё (★). Хабы — карусель."
+        "Double-tap the board name to open all projects. Open hubs or boards from the top menu. Star a primary hub in More. Swipe hubs left and right.",
+        "Двойной тап по названию доски — все проекты. Хабы и доски — в верхнем меню. Основной хаб — в Ещё (★). Хабы листаются влево-вправо."
     )
     val onboardingTitle2 get() = t("Due dates & reminders", "Сроки и напоминания")
     val onboardingText2 get() = t(
@@ -422,6 +420,7 @@ class AppStrings(private val appLanguage: AppLanguage) {
     )
     fun movedToHub(name: String) = t("Moved to ${quoted(name)}", "Перемещено в ${quoted(name)}")
     fun completedCount(count: Int) = t("Done ($count)", "Выполнено ($count)")
+    fun moreTasksCount(count: Int) = t("+$count more", "ещё $count")
     fun clearCompletedText(count: Int, hub: String) = t(
         "Delete these $count completed tasks from hub ${quoted(hub)}? They will be removed from every board.",
         "Удалить эти выполненные задачи ($count) из хаба ${quoted(hub)}? Они пропадут со всех досок."
