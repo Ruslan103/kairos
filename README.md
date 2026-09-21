@@ -5,7 +5,7 @@
 [![Room](https://img.shields.io/badge/Room%20DB-2.6.1-orange?style=flat&logo=sqlite&logoColor=white)](https://developer.android.com/training/data-storage/room)
 [![Architecture](https://img.shields.io/badge/Architecture-Clean%20%2B%20SOLID%20%2B%20MVVM-success)](#архитектура)
 [![API](https://img.shields.io/badge/Min%20SDK-26%2B-brightgreen)](https://android-arsenal.com/api?level=26)
-[![Version](https://img.shields.io/badge/Version-1.1.5-blue)](app/build.gradle.kts)
+[![Version](https://img.shields.io/badge/Version-1.1.6-blue)](app/build.gradle.kts)
 [![License: Non-Commercial](https://img.shields.io/badge/License-Non--Commercial-orange.svg)](LICENSE)
 
 **Язык:** [Русский](README.md) · [English](README.en.md)
@@ -121,7 +121,7 @@ app/src/main/java/com/example/kaizenkanban/
 
 - Kotlin 2.1.0, Jetpack Compose Material 3, Room 2.6.1 + KSP
 - Coroutines / Flow / StateFlow, Navigation Compose, WindowSizeClass
-- Gradle Kotlin DSL, AGP 8.3.2 · Min SDK 26 · Target / Compile SDK 34 · app **1.1.5**
+- Gradle Kotlin DSL, AGP 8.3.2 · Min SDK 26 · Target / Compile SDK 34 · app **1.1.6**
 
 ---
 
