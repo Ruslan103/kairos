@@ -668,19 +668,19 @@ fun BoardScreen(
     val tabRowState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
-    // Soft pager snap: very low stiffness so page-edge hand-off eases in instead of catching.
+    // Soft pager snap: low stiffness so the edge hand-off eases in (not a hard catch).
     val hubSnapDecay = rememberSplineBasedDecay<Float>()
     val hubSnapDensity = LocalDensity.current
     val flingBehavior = remember(lazyListState, hubSnapDecay, hubSnapDensity) {
-        val snapThresholdPx = with(hubSnapDensity) { 0.5.dp.toPx() }
+        val snapThresholdPx = with(hubSnapDensity) { 1.dp.toPx() }
         val softSnap = spring(
-            dampingRatio = 0.96f,
-            stiffness = 38f,
+            dampingRatio = 0.92f,
+            stiffness = 110f,
             visibilityThreshold = snapThresholdPx
         )
         val softLowVelocity = spring(
-            dampingRatio = 0.98f,
-            stiffness = 28f,
+            dampingRatio = 0.94f,
+            stiffness = 85f,
             visibilityThreshold = snapThresholdPx
         )
         val snappingLayout = SnapLayoutInfoProvider(
@@ -817,38 +817,43 @@ fun BoardScreen(
     val dropPreviewState = remember { mutableStateOf<TaskDropPreview?>(null) }
     var hoveredOtherBoardId by remember { mutableStateOf<String?>(null) }
 
-    // Only the settled hub keeps full TaskCards; peeks stay lite. Settled page updates after
-    // scroll stops — so the open hub keeps its buttons for the whole swipe (cheap enough;
-    // the FPS win is lite neighbors + deferred settle, not stripping the current page).
+    // Lite while paging: keep ALL pages cheap until settle commits, otherwise the leaving
+    // hub briefly rebuilds full TaskCards (classic end hitch). Defer lite until the page has
+    // actually moved so full→lite on finger-down doesn't hitch the swipe start.
     var hubSettledVirtual by remember { mutableIntStateOf(0) }
-    /** Pull-down grabber appears with task action buttons after hub settle — not mid-swipe. */
+    var hubPagingActive by remember { mutableStateOf(false) }
     var hubGrabberVisible by remember { mutableStateOf(true) }
-
-    LaunchedEffect(lazyListState) {
-        snapshotFlow { lazyListState.isScrollInProgress }
-            .distinctUntilChanged()
-            .collect { scrolling ->
-                if (scrolling) hubGrabberVisible = false
-            }
-    }
 
     LaunchedEffect(lazyListState, hubPagerCount) {
         snapshotFlow {
-            Triple(
-                lazyListState.isScrollInProgress,
-                draggedTask != null,
-                hubVirtualNearCenter()
-            )
+            val scrolling = lazyListState.isScrollInProgress
+            val first = lazyListState.firstVisibleItemIndex
+            val offset = lazyListState.firstVisibleItemScrollOffset
+            val pageW = lazyListState.layoutInfo.visibleItemsInfo
+                .firstOrNull { it.index == first }
+                ?.size
+                ?: 0
+            val progressed = first != hubSettledVirtual ||
+                (pageW > 0 && offset > pageW / 12)
+            Triple(scrolling, progressed, draggedTask != null)
         }
             .distinctUntilChanged()
-            .collectLatest { (scrolling, dragging, center) ->
-                if (dragging || scrolling) {
+            .collectLatest { (scrolling, progressed, dragging) ->
+                if (dragging) {
                     hubGrabberVisible = false
                     return@collectLatest
                 }
-                // Wait for soft snap ease to finish before swapping lite→full.
-                kotlinx.coroutines.delay(200)
+                if (scrolling) {
+                    hubGrabberVisible = false
+                    if (progressed) hubPagingActive = true
+                    return@collectLatest
+                }
+                // Scroll ended: commit settled page BEFORE clearing paging so the leaving
+                // hub never flips full while still in the LazyRow composition window.
+                kotlinx.coroutines.delay(48)
+                val center = hubVirtualNearCenter()
                 hubSettledVirtual = center
+                hubPagingActive = false
                 hubGrabberVisible = !isAddHubVirtual(center)
                 if (!isAddHubVirtual(center)) {
                     val real = virtualToReal(center)
@@ -2031,7 +2036,8 @@ fun BoardScreen(
                         val index = virtualToReal(virtual)
                         val column = columns[index]
                         val columnTasks = tasksInHub(column, index)
-                        val useLiteCards = draggedTask == null && virtual != hubSettledVirtual
+                        val useLiteCards = draggedTask == null &&
+                            (hubPagingActive || virtual != hubSettledVirtual)
 
                         Box(
                             modifier = Modifier
@@ -2112,7 +2118,7 @@ fun BoardScreen(
                                 taskForMoveHubId = column.id
                             },
                             draggedTaskId = draggedTask?.id,
-                            chromePullEnabled = draggedTask == null,
+                            chromePullEnabled = draggedTask == null && !hubPagingActive,
                             dropPreviewState = dropPreviewState,
                             observeDropPreview = !useLiteCards,
                             reportPositions = draggedTask != null && !useLiteCards,
@@ -3177,10 +3183,8 @@ fun BoardScreen(
 
             AnimatedVisibility(
                 visible = !showTopBar && chromePullPx <= 0.5f && hubGrabberVisible,
-                enter = fadeIn(animationSpec = tween(400, easing = FastOutSlowInEasing)) +
-                    expandVertically(animationSpec = tween(400, easing = FastOutSlowInEasing)),
-                exit = fadeOut(animationSpec = tween(90)) +
-                    shrinkVertically(animationSpec = tween(90)),
+                enter = fadeIn(animationSpec = tween(400, easing = FastOutSlowInEasing)),
+                exit = fadeOut(animationSpec = tween(60)),
                 modifier = Modifier.align(Alignment.TopCenter)
             ) {
                 Box(
