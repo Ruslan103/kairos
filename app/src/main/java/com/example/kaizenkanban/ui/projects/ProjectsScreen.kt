@@ -89,7 +89,6 @@ import com.example.kaizenkanban.ui.calendar.isDueToday
 import com.example.kaizenkanban.ui.calendar.isOverdueDate
 import com.example.kaizenkanban.ui.calendar.localMillisToUtcPicker
 import com.example.kaizenkanban.ui.calendar.relativeDueLabel
-import com.example.kaizenkanban.ui.calendar.startOfLocalDayMillis
 import com.example.kaizenkanban.ui.calendar.utcPickerMillisToLocalNoon
 import com.example.kaizenkanban.ui.i18n.AppLanguage
 import com.example.kaizenkanban.ui.i18n.AppStrings
@@ -357,16 +356,6 @@ fun ProjectsScreen(
         }
     }
 
-    val weekStartMs = remember { startOfLocalDayMillis() - 6L * 86_400_000L }
-    val weekCompletedCount = remember(state.tasks, weekStartMs) {
-        state.tasks.count { task ->
-            task.isCompleted && (task.completedAt ?: 0L) >= weekStartMs
-        }
-    }
-    val weekCreatedCount = remember(state.tasks, weekStartMs) {
-        state.tasks.count { it.createdAt >= weekStartMs }
-    }
-
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
@@ -530,14 +519,6 @@ fun ProjectsScreen(
                         shape = RoundedCornerShape(12.dp)
                     )
                 }
-                Text(
-                    text = "${s.weekStats}: ${s.weekCompleted(weekCompletedCount)} · ${s.weekCreated(weekCreatedCount)}",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(bottom = 4.dp)
-                )
             }
         },
         floatingActionButton = {

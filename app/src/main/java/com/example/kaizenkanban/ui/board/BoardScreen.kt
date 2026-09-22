@@ -2186,9 +2186,9 @@ fun BoardScreen(
                             }
                         },
                         modifier = Modifier
-                            .align(Alignment.TopCenter)
+                            .align(Alignment.BottomCenter)
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 8.dp)
+                            .padding(start = 16.dp, end = 16.dp, bottom = 88.dp)
                             .zIndex(2f),
                         shape = RoundedCornerShape(10.dp),
                         color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.92f),
