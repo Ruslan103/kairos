@@ -12,10 +12,10 @@
 
 > *In ancient Greek thought there are two kinds of time: Chronos — the steady ticking of the clock — and **Kairos** — the right, meaningful moment to act.*
 
-**Kairos** is an Android app for strategic and day-to-day planning: **OKR**, the **Eisenhower Matrix**, and **single-task focus**.
+**Kairos** is an Android app for strategic and day-to-day planning: a **goal ladder**, the **Eisenhower Matrix**, **Review**, and **single-task focus**.
 
 It connects goals with today’s actions:
-- **OKR board:** Today → Soon → Ongoing → Main Goal.
+- **Goal ladder:** Waiting on others → Do → Planning → Holding course → Main Goal.
 - **Eisenhower board:** four daily priority quadrants.
 - **Task mirroring:** the same card can live in the plan and in the matrix.
 - **UI languages:** English and Russian.
@@ -26,7 +26,7 @@ It connects goals with today’s actions:
 
 > _(Add screenshots or a demo GIF)_
 
-| OKR board | Eisenhower Matrix | Focus / widget | Calendar |
+| Goal ladder | Eisenhower Matrix | Review / focus | Calendar |
 |:---:|:---:|:---:|:---:|
 | `Screenshot 1` | `Screenshot 2` | `Screenshot 3` | `Screenshot 4` |
 
@@ -34,11 +34,17 @@ It connects goals with today’s actions:
 
 ## Features
 
-### Planning (OKR + Eisenhower)
-- OKR hubs from a daily step to the main goal.
+### Planning (goal ladder + Eisenhower)
+- **Goal ladder** hubs from a parked wait to the main goal.
+- Default primary hub: **Do**.
 - Matrix board Q1–Q4; card buttons paint the task and mirror it into the matrix.
 - Fast board switcher under the header with live counts.
 - Projects, multiple boards, archive, board templates.
+
+### Review
+- **Goals** and **Period** tabs: **Total** picture or change for day / week / …
+- Progress bars, movement toward goal, likelihood of completion.
+- Archive clear/delete keeps stats in a journal (unless marked ignore-in-stats).
 
 ### Primary board and primary hub
 - **Primary board** (`★` in Projects) — default home and quick-add target.
@@ -50,14 +56,18 @@ It connects goals with today’s actions:
 - Focus shows on home-screen widgets.
 
 ### Cards and hubs
-- On the settled hub: ⚡ / ✓ and ⋮ (comments, due date, repeat, matrix, move, hide, delete…).
-- Neighbor hubs stay lite; full chrome and action buttons appear after the swipe settles (soft snap).
+- On the settled hub: ⚡ / ✓ and ⋮ (comments, due date, links, criteria, matrix, move, hide, delete…).
+- Neighbor hubs stay lite; full chrome appears after the swipe settles.
 - Drag & drop within and across hubs; long-press opens a cross-board drop panel.
-- Double-tap the board title to open Projects.
+- Double-tap the board title to open Projects; long titles marquee on the settled hub.
 
-### Due dates, repeats, reminders
+### Recurring habits
+- Project-owned templates; instances appear in the chosen hub.
+- Rhythms: daily, weekdays, every N days.
+
+### Due dates and reminders
 - Due dates via DatePicker; calendar screen (overdue, Q badges).
-- Task repeat; local due reminders (time in Settings).
+- Local due reminders (time in Settings).
 - Android notification channel with Done / Snooze / Undo actions.
 
 ### Widgets
@@ -72,7 +82,7 @@ It connects goals with today’s actions:
 ### Quick add and settings
 - Quick Add from the widget or app; destination (board/hub) in Settings.
 - Theme (system / light / dark), Q1–Q4 palette, language, Enter saves a task.
-- Onboarding and a short OKR planning guide.
+- Onboarding, planning guide, and a plain-language taps-and-swipes guide.
 
 ### Export / import
 - JSON / `.kairos`; share to messengers; deep link `kairos://import?data=...`.
@@ -81,12 +91,13 @@ It connects goals with today’s actions:
 
 ## Quick start
 
-1. Open the OKR or Eisenhower board; swipe hubs horizontally.
+1. Open the Goal ladder or Eisenhower board; swipe hubs horizontally.
 2. Add a task; set due date, Q1–Q4, and category as needed.
 3. Tap ⚡ to focus (also appears on the widget).
 4. Board **More** → primary hub, hub list, sort, overdue filter.
 5. In Projects mark the **primary board**; in Settings set quick-add destination and reminder time.
-6. Add a home-screen widget for focus and deadlines.
+6. Open project **Review** for goal progress and periods.
+7. Add a home-screen widget for focus and quick add / voice.
 
 ---
 
@@ -97,22 +108,28 @@ Clean Architecture + SOLID + MVVM:
 ```
 app/src/main/java/com/example/kaizenkanban/
 ├── data/           # Room, DAO, prefs, repository, transfer (.kairos)
-├── domain/         # models, interfaces, use cases
-├── reminders/      # due alerts, notification quick actions
-├── widget/         # Home-screen focus widget (+ idle add/voice)
+├── domain/         # models, stats, use cases
+├── reminders/      # due alerts, recurring instance ensure
+├── voice/          # speech recognition and commands
+├── widget/         # home-screen focus widget (+ idle add/voice)
+├── pro/            # entitlements stub
 └── ui/
     ├── board/      # kanban / hubs
     ├── calendar/
     ├── projects/
+    ├── stats/      # Review
+    ├── recurring/
+    ├── eisenhower/
     ├── settings/
     ├── onboarding/
+    ├── voice/
     ├── i18n/       # EN / RU strings
     ├── navigation/
     ├── theme/
     └── viewmodel/
 ```
 
-**Database:** Room schema **v16**, migrations `4→16` without wipe. UUID keys.
+**Database:** Room schema **v29**, migrations without wipe. UUID keys.
 
 ---
 
@@ -145,10 +162,10 @@ Release (with `keystore.properties`): `.\gradlew.bat assembleRelease`
 ## Roadmap
 
 - [x] Local due reminders and home-screen widgets
+- [x] Review for goals and periods
 - [ ] Cloud sync
 - [ ] Sign-in (Google Sign-In)
 - [ ] Compose Multiplatform (desktop)
-- [ ] Productivity analytics
 
 ---
 
