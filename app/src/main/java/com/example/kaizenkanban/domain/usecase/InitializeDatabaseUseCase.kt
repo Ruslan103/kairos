@@ -2,7 +2,6 @@ package com.example.kaizenkanban.domain.usecase
 
 import com.example.kaizenkanban.data.local.KairosPreferences
 import com.example.kaizenkanban.domain.model.Board
-import com.example.kaizenkanban.domain.model.Category
 import com.example.kaizenkanban.domain.model.Column
 import com.example.kaizenkanban.domain.model.ColumnComment
 import com.example.kaizenkanban.domain.model.Project
@@ -65,20 +64,20 @@ class InitializeDatabaseUseCase(
                 .replace("💤", "")
                 .trim()
 
-        // 1. OKR Board setup (clean typography, no emojis)
-        val okrHubTitles = listOf("Сегодня", "Скоро", "Постоянно", "Главная цель")
+        // 1. Goal ladder board (stored RU titles; UI maps via AppStrings.localized)
+        val goalLadderHubTitles = GOAL_LADDER_HUB_TITLES
         var okrBoard = findOkrBoard(allBoards, allColumns)
         if (okrBoard == null) {
             repository.clearDefaultBoards()
             okrBoard = Board(
                 id = UUID.randomUUID().toString(),
                 projectId = mainProject.id,
-                name = "OKR",
+                name = GOAL_LADDER_BOARD_NAME,
                 isDefault = true
             )
             repository.insertBoard(okrBoard)
 
-            val okrColumns = okrHubTitles.mapIndexed { index, title ->
+            val okrColumns = goalLadderHubTitles.mapIndexed { index, title ->
                 Column(
                     id = UUID.randomUUID().toString(),
                     boardId = okrBoard.id,
@@ -87,10 +86,20 @@ class InitializeDatabaseUseCase(
                 )
             }
             repository.insertColumns(okrColumns)
+            okrColumns.find { it.title == PRIMARY_GOAL_LADDER_HUB }?.let {
+                prefs?.setPrimaryHubId(okrBoard.id, it.id)
+            }
         } else {
-            // Clean board name if it had emojis
-            if (okrBoard.name.contains("🎯") || okrBoard.name != cleanEmoji(okrBoard.name)) {
-                okrBoard = okrBoard.copy(name = cleanEmoji(okrBoard.name))
+            val cleanedName = cleanEmoji(okrBoard.name)
+            val renamedBoard = when {
+                cleanedName.equals("OKR", ignoreCase = true) ||
+                    cleanedName.contains("OKR", ignoreCase = true) ->
+                    GOAL_LADDER_BOARD_NAME
+                cleanedName != okrBoard.name -> cleanedName
+                else -> okrBoard.name
+            }
+            if (renamedBoard != okrBoard.name) {
+                okrBoard = okrBoard.copy(name = renamedBoard)
                 repository.insertBoard(okrBoard)
             }
 
@@ -98,14 +107,17 @@ class InitializeDatabaseUseCase(
             if (okrCols.isNotEmpty()) {
                 val needReversal = okrCols.first().title.contains("Стратег", ignoreCase = true)
                 val sourceList = if (needReversal) okrCols.reversed() else okrCols
-                val cleanedCols = sourceList.mapIndexed { index, col ->
+                val renamed = sourceList.map { col ->
                     val mapped = mapOkrHubTitle(col.title)
-                    // Only remap known legacy titles; never force-replace all hubs when one is legacy.
-                    col.copy(title = mapped ?: cleanEmoji(col.title), position = index)
+                    col.copy(title = mapped ?: cleanEmoji(col.title))
                 }
-                repository.insertColumns(cleanedCols)
+                val migrated = ensureGoalLadderHubs(okrBoard.id, renamed)
+                repository.insertColumns(migrated)
+                migrated.find { it.title == PRIMARY_GOAL_LADDER_HUB }?.let {
+                    prefs?.setPrimaryHubId(okrBoard.id, it.id)
+                }
                 refreshDefaultRulesForColumns(
-                    cleanedCols,
+                    migrated,
                     languageCode.startsWith("ru")
                 )
             }
@@ -170,28 +182,16 @@ class InitializeDatabaseUseCase(
         val hasUsableDefault = activeBoards.any { it.isDefault }
         if (!hasUsableDefault) {
             val targetDefault = activeBoards.find { it.id == prefs?.okrBoardId }
-                ?: activeBoards.find { it.name.contains("OKR", ignoreCase = true) }
+                ?: activeBoards.find { isGoalLadderBoardName(it.name) }
                 ?: activeBoards.firstOrNull()
                 ?: currentBoards.firstOrNull()
             targetDefault?.let { repository.setDefaultBoard(it.id) }
         } else if (currentBoards.count { it.isDefault } > 1) {
             val keep = activeBoards.find { it.isDefault && it.id == prefs?.okrBoardId }
-                ?: activeBoards.find { it.isDefault && it.name.contains("OKR", ignoreCase = true) }
+                ?: activeBoards.find { it.isDefault && isGoalLadderBoardName(it.name) }
                 ?: activeBoards.find { it.isDefault }
                 ?: currentBoards.first { it.isDefault }
             repository.setDefaultBoard(keep.id)
-        }
-
-        // 4. Default categories
-        if (repository.getCategoriesCount() == 0) {
-            val defaultCategories = listOf(
-                Category(UUID.randomUUID().toString(), "Размышление", 0xFF9D2CFF),
-                Category(UUID.randomUUID().toString(), "Изучение", 0xFFFFB020),
-                Category(UUID.randomUUID().toString(), "Контроль", 0xFFFF2A5F),
-                Category(UUID.randomUUID().toString(), "Исполнение", 0xFF00D287),
-                Category(UUID.randomUUID().toString(), "Без категории", 0xFFAAAAAA)
-            )
-            defaultCategories.forEach { repository.insertCategory(it) }
         }
 
         // 5. Default rules/comments for columns (Hubs)
@@ -217,15 +217,32 @@ class InitializeDatabaseUseCase(
 
     companion object {
         /** Increment when seed/migration steps above change and must re-run once. */
-        const val SEED_VERSION = 1
+        const val SEED_VERSION = 2
+
+        const val GOAL_LADDER_BOARD_NAME = "Лестница целей"
+        const val PRIMARY_GOAL_LADDER_HUB = "Сделать"
+        val GOAL_LADDER_HUB_TITLES = listOf(
+            "На стороне контрагента",
+            "Сделать",
+            "Планирую",
+            "Держу курс",
+            "Главная цель"
+        )
+
+        fun isGoalLadderBoardName(name: String?): Boolean {
+            val n = name.orEmpty()
+            return n.contains("OKR", ignoreCase = true) ||
+                n.contains("Лестница целей", ignoreCase = true) ||
+                n.contains("Goal ladder", ignoreCase = true)
+        }
     }
 
     private fun findOkrBoard(boards: List<Board>, columns: List<Column>): Board? {
         prefs?.okrBoardId?.let { id -> boards.find { it.id == id } }?.let { return it }
-        boards.find { it.name.contains("OKR", ignoreCase = true) }?.let { return it }
+        boards.find { isGoalLadderBoardName(it.name) }?.let { return it }
         return boards.firstOrNull { board ->
             val hubs = columns.filter { it.boardId == board.id }
-            hubs.size == 4 && hubs.count { mapOkrHubTitle(it.title) != null } >= 3
+            hubs.count { mapOkrHubTitle(it.title) != null } >= 3
         }
     }
 
@@ -250,22 +267,30 @@ class InitializeDatabaseUseCase(
     }
 
     /**
-     * Canonical OKR hub titles (stored in Russian; [AppStrings.localized] maps for EN UI).
-     * Legacy: Действия / Спринты / Метрики / Мечта / Dream (and EN equivalents).
+     * Canonical goal-ladder hub titles (stored in Russian; [AppStrings.localized] maps for EN UI).
+     * Legacy: Сегодня / Скоро / Постоянно / Действия / Спринты / Метрики / Мечта / Dream.
      */
     private fun mapOkrHubTitle(title: String): String? {
         val t = title.trim()
         val lower = t.lowercase()
         return when {
-            lower == "сегодня" || lower == "today" ||
+            lower.contains("контрагент") ||
+                lower.contains("counterparty") ||
+                lower.contains("waiting on") ||
+                lower == "on their side" -> "На стороне контрагента"
+
+            lower == "сделать" || lower == "do" || lower == "to do" || lower == "todo" ||
+                lower == "сегодня" || lower == "today" ||
                 lower == "сейчас" || lower == "now" ||
-                lower.contains("действ") || lower == "actions" -> "Сегодня"
+                lower.contains("действ") || lower == "actions" -> "Сделать"
 
-            lower == "скоро" || lower == "soon" ||
-                lower.contains("спринт") || lower.contains("такт") || lower == "sprints" -> "Скоро"
+            lower == "планирую" || lower == "planning" || lower == "plan" ||
+                lower == "скоро" || lower == "soon" ||
+                lower.contains("спринт") || lower.contains("такт") || lower == "sprints" -> "Планирую"
 
-            lower == "постоянно" || lower == "ongoing" || lower == "constantly" ||
-                lower.contains("метрик") || lower.contains("результ") || lower == "metrics" -> "Постоянно"
+            lower == "держу курс" || lower == "holding course" || lower == "on course" ||
+                lower == "постоянно" || lower == "ongoing" || lower == "constantly" ||
+                lower.contains("метрик") || lower.contains("результ") || lower == "metrics" -> "Держу курс"
 
             lower == "мечта" || lower == "dream" ||
                 lower.contains("главная цель") || lower.contains("стратег") ||
@@ -273,6 +298,29 @@ class InitializeDatabaseUseCase(
 
             else -> null
         }
+    }
+
+    /** Ensure canonical hubs exist and sit in the expected order; keep custom hubs after. */
+    private fun ensureGoalLadderHubs(boardId: String, existing: List<Column>): List<Column> {
+        val remaining = existing.toMutableList()
+        val ordered = mutableListOf<Column>()
+        GOAL_LADDER_HUB_TITLES.forEach { title ->
+            val idx = remaining.indexOfFirst { it.title.equals(title, ignoreCase = true) }
+            if (idx >= 0) {
+                ordered += remaining.removeAt(idx).copy(title = title, position = ordered.size)
+            } else {
+                ordered += Column(
+                    id = UUID.randomUUID().toString(),
+                    boardId = boardId,
+                    title = title,
+                    position = ordered.size
+                )
+            }
+        }
+        remaining.forEach { col ->
+            ordered += col.copy(position = ordered.size)
+        }
+        return ordered
     }
 
     private suspend fun refreshDefaultRulesForColumns(columns: List<Column>, russian: Boolean) {
@@ -314,35 +362,49 @@ class InitializeDatabaseUseCase(
                         "• Регулярно просматривайте этот хаб и переносите задачи на нужные доски."
                 )
 
-            clean == "сегодня" || clean == "today" ||
+            clean.contains("контрагент") || clean.contains("counterparty") ||
+                clean.contains("waiting on") ->
+                rule(
+                    "Rules for Waiting on others:\n" +
+                        "• Work that is blocked on someone else — client, partner, teammate.\n" +
+                        "• Park it here so it does not clog “Do”. Follow up when you can.",
+                    "Правила для хаба «На стороне контрагента»:\n" +
+                        "• Задачи, которые ждут ответа или действия от другого человека — клиент, партнёр, коллега.\n" +
+                        "• Держите их здесь, чтобы не забивали «Сделать». Возвращайтесь с напоминанием."
+                )
+
+            clean == "сделать" || clean == "do" || clean == "to do" || clean == "todo" ||
+                clean == "сегодня" || clean == "today" ||
                 clean == "сейчас" || clean == "now" || clean.contains("действ") || clean == "actions" ->
                 rule(
-                    "Rules for Today:\n" +
+                    "Rules for Do:\n" +
                         "• Concrete actions for today — one clear step you can do now.\n" +
                         "• Write as a verb: “Go to the gym”, “Do bench press”.",
-                    "Правила для хаба «Сегодня»:\n" +
+                    "Правила для хаба «Сделать»:\n" +
                         "• Конкретное действие на сегодня — один понятный шаг.\n" +
                         "• Пишите глаголом: «Сходить в зал», «Сделать жим»."
                 )
 
-            clean == "скоро" || clean == "soon" ||
+            clean == "планирую" || clean == "planning" || clean == "plan" ||
+                clean == "скоро" || clean == "soon" ||
                 clean.contains("спринт") || clean.contains("такт") || clean == "sprints" ->
                 rule(
-                    "Rules for Soon:\n" +
+                    "Rules for Planning:\n" +
                         "• The next stretch (about a week): e.g. “Gym 3 times this week”.\n" +
-                        "• Pull today’s step into Today from here.",
-                    "Правила для хаба «Скоро»:\n" +
+                        "• Pull today’s step into Do from here.",
+                    "Правила для хаба «Планирую»:\n" +
                         "• Ближайший этап (примерно неделя): например «Зал 3 раза на этой неделе».\n" +
-                        "• Отсюда берите сегодняшний шаг в «Сегодня»."
+                        "• Отсюда берите сегодняшний шаг в «Сделать»."
                 )
 
-            clean == "постоянно" || clean == "ongoing" || clean == "constantly" ||
+            clean == "держу курс" || clean == "holding course" || clean == "on course" ||
+                clean == "постоянно" || clean == "ongoing" || clean == "constantly" ||
                 clean.contains("метрик") || clean.contains("результ") || clean == "metrics" ->
                 rule(
-                    "Rules for Ongoing:\n" +
+                    "Rules for Holding course:\n" +
                         "• The habit or practice that keeps you on course: e.g. “Go to the gym”.\n" +
                         "• Not one day — something you keep repeating.",
-                    "Правила для хаба «Постоянно»:\n" +
+                    "Правила для хаба «Держу курс»:\n" +
                         "• Привычка или практика, которая держит курс: например «Ходить в зал».\n" +
                         "• Не разовое дело, а то, что повторяете регулярно."
                 )
@@ -404,10 +466,10 @@ class InitializeDatabaseUseCase(
             clean.contains("на неделе") || clean.contains("this week") ->
                 rule(
                     "Rules for This week:\n" +
-                        "• The 7-day focus. Pull from here into Today.",
+                        "• The 7-day focus. Pull from here into Do.",
                     "Правила для хаба «На неделе»:\n" +
                         "• Фокус на 7 дней. То, что важно продвинуть на текущей неделе.\n" +
-                        "• Из этого хаба задачи отбираются в хаб «Сегодня»."
+                        "• Из этого хаба задачи отбираются в хаб «Сделать»."
                 )
 
             clean.contains("на месяц") ->

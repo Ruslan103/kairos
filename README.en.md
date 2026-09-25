@@ -5,7 +5,7 @@
 [![Room](https://img.shields.io/badge/Room%20DB-2.6.1-orange?style=flat&logo=sqlite&logoColor=white)](https://developer.android.com/training/data-storage/room)
 [![Architecture](https://img.shields.io/badge/Architecture-Clean%20%2B%20SOLID%20%2B%20MVVM-success)](#architecture)
 [![API](https://img.shields.io/badge/Min%20SDK-26%2B-brightgreen)](https://android-arsenal.com/api?level=26)
-[![Version](https://img.shields.io/badge/Version-1.1.9-blue)](app/build.gradle.kts)
+[![Version](https://img.shields.io/badge/Version-1.2.0-blue)](app/build.gradle.kts)
 [![License: Non-Commercial](https://img.shields.io/badge/License-Non--Commercial-orange.svg)](LICENSE)
 
 **Languages:** [English](README.en.md) · [Русский](README.md)
@@ -61,8 +61,7 @@ It connects goals with today’s actions:
 - Android notification channel with Done / Snooze / Undo actions.
 
 ### Widgets
-- **Kairos** — focus + overdue/today tasks + quick add.
-- **Kairos Focus** — focus task only.
+- **Kairos** — focus task; when idle, large add-task and voice buttons.
 - Add via long-press home screen → Widgets → Kairos.
 
 ### Statuses, comments, contacts
@@ -100,7 +99,7 @@ app/src/main/java/com/example/kaizenkanban/
 ├── data/           # Room, DAO, prefs, repository, transfer (.kairos)
 ├── domain/         # models, interfaces, use cases
 ├── reminders/      # due alerts, notification quick actions
-├── widget/         # App Widgets (list + focus)
+├── widget/         # Home-screen focus widget (+ idle add/voice)
 └── ui/
     ├── board/      # kanban / hubs
     ├── calendar/
@@ -121,7 +120,7 @@ app/src/main/java/com/example/kaizenkanban/
 
 - Kotlin 2.1.0, Jetpack Compose Material 3, Room 2.6.1 + KSP
 - Coroutines / Flow / StateFlow, Navigation Compose, WindowSizeClass
-- Gradle Kotlin DSL, AGP 8.3.2 · Min SDK 26 · Target / Compile SDK 34 · app **1.1.9**
+- Gradle Kotlin DSL, AGP 8.3.2 · Min SDK 26 · Target / Compile SDK 34 · app **1.2.0**
 
 ---
 

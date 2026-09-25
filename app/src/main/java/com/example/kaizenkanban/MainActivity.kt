@@ -20,6 +20,7 @@ import com.example.kaizenkanban.data.local.KairosPreferences
 import com.example.kaizenkanban.data.repository.KanbanRepositoryImpl
 import com.example.kaizenkanban.domain.usecase.*
 import com.example.kaizenkanban.reminders.DueReminderScheduler
+import com.example.kaizenkanban.reminders.RecurringEnsureScheduler
 import com.example.kaizenkanban.ui.i18n.AppLanguage
 import com.example.kaizenkanban.ui.i18n.AppStrings
 import com.example.kaizenkanban.ui.i18n.ProvideAppLanguage
@@ -77,6 +78,7 @@ class MainActivity : ComponentActivity() {
         val moveTaskToBoardUseCase = MoveTaskToBoardUseCase(repository, moveTaskUseCase)
         val exportDataUseCase = ExportDataUseCase(repository)
         val importDataUseCase = ImportDataUseCase(repository)
+        val ensureRecurringInstancesUseCase = EnsureRecurringInstancesUseCase(repository)
 
         val factory = SharedViewModelFactory(
             repository,
@@ -95,7 +97,8 @@ class MainActivity : ComponentActivity() {
             deleteColumnCommentUseCase,
             moveTaskToBoardUseCase,
             exportDataUseCase,
-            importDataUseCase
+            importDataUseCase,
+            ensureRecurringInstancesUseCase
         )
         viewModel = ViewModelProvider(this, factory)[SharedViewModel::class.java]
 
@@ -103,6 +106,7 @@ class MainActivity : ComponentActivity() {
 
         lifecycleScope.launch(Dispatchers.Default) {
             DueReminderScheduler.ensureChannel(this@MainActivity)
+            RecurringEnsureScheduler.scheduleNext(this@MainActivity)
         }
 
         lifecycleScope.launch {
@@ -174,6 +178,14 @@ class MainActivity : ComponentActivity() {
         if (intent.getBooleanExtra(DueReminderScheduler.EXTRA_OPEN_QUICK_ADD, false)) {
             viewModel.requestQuickAdd()
             intent.removeExtra(DueReminderScheduler.EXTRA_OPEN_QUICK_ADD)
+        }
+        if (intent.getBooleanExtra(DueReminderScheduler.EXTRA_OPEN_VOICE, false)) {
+            viewModel.requestVoiceAssistant()
+            intent.removeExtra(DueReminderScheduler.EXTRA_OPEN_VOICE)
+        }
+        if (intent.getBooleanExtra(DueReminderScheduler.EXTRA_OPEN_ADD_TASK, false)) {
+            viewModel.requestAddTask()
+            intent.removeExtra(DueReminderScheduler.EXTRA_OPEN_ADD_TASK)
         }
 
         val uri = intent.data ?: return

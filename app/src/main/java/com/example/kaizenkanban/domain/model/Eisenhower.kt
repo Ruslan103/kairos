@@ -46,4 +46,13 @@ object Eisenhower {
         Q4 -> 3
         else -> 4
     }
+
+    /** Basis points for goal weight: Q1=1.40× … null=1.00× */
+    fun importanceCents(quadrant: String?): Int = when (quadrant) {
+        Q1 -> 140
+        Q2 -> 120
+        Q3 -> 100
+        Q4 -> 85
+        else -> 100
+    }
 }

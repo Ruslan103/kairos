@@ -40,10 +40,13 @@ import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.Insights
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
@@ -90,6 +93,7 @@ import com.example.kaizenkanban.ui.calendar.isOverdueDate
 import com.example.kaizenkanban.ui.calendar.localMillisToUtcPicker
 import com.example.kaizenkanban.ui.calendar.relativeDueLabel
 import com.example.kaizenkanban.ui.calendar.utcPickerMillisToLocalNoon
+import com.example.kaizenkanban.ui.components.DialogSectionDivider
 import com.example.kaizenkanban.ui.i18n.AppLanguage
 import com.example.kaizenkanban.ui.i18n.AppStrings
 import com.example.kaizenkanban.ui.i18n.KanbanNames
@@ -101,6 +105,7 @@ import com.example.kaizenkanban.ui.sanitizeQuickAddPrefs
 import com.example.kaizenkanban.ui.theme.deleteButtonColor
 import com.example.kaizenkanban.ui.theme.deleteButtonGradient
 import com.example.kaizenkanban.ui.theme.newProjectGradient
+import com.example.kaizenkanban.ui.voice.rememberVoiceAssistantController
 import com.example.kaizenkanban.ui.viewmodel.SharedViewModel
 import java.io.File
 import kotlinx.coroutines.launch
@@ -112,10 +117,24 @@ fun ProjectsScreen(
     onNavigateToBoard: (boardId: String, columnId: String?) -> Unit,
     onNavigateToCalendar: () -> Unit,
     onNavigateToSettings: () -> Unit = {},
+    onNavigateToRecurring: (projectId: String) -> Unit = {},
+    onNavigateToEisenhower: (projectId: String) -> Unit = {},
+    onNavigateToStats: (projectId: String) -> Unit = {},
     consumePendingQuickAdd: Boolean = true
 ) {
     val state by viewModel.state.collectAsState()
     val pendingQuickAdd by viewModel.pendingQuickAdd.collectAsState()
+    val pendingVoiceAssistant by viewModel.pendingVoiceAssistant.collectAsState()
+    val voiceAssistant = rememberVoiceAssistantController(
+        viewModel = viewModel,
+        openColumnIdProvider = { null }
+    )
+    val voiceMicClick = rememberUpdatedState(voiceAssistant.onMicClick)
+    LaunchedEffect(pendingVoiceAssistant) {
+        if (!pendingVoiceAssistant) return@LaunchedEffect
+        if (!viewModel.consumePendingVoiceAssistant()) return@LaunchedEffect
+        voiceMicClick.value.invoke()
+    }
     
     var isAddingProject by remember { mutableStateOf(false) }
     var newProjectName by remember { mutableStateOf("") }
@@ -152,7 +171,6 @@ fun ProjectsScreen(
     val kairosPrefs = remember { KairosPreferences(context) }
     var showArchivedBoards by remember { mutableStateOf(kairosPrefs.showArchivedBoards) }
     var focusTaskId by remember { mutableStateOf(kairosPrefs.inProgressTaskId) }
-    var projectsCollapsed by remember { mutableStateOf(kairosPrefs.projectsCollapsed) }
     var showOnboarding by remember { mutableStateOf(!kairosPrefs.hasSeenOnboarding) }
     var notificationsGranted by remember {
         mutableStateOf(
@@ -188,6 +206,9 @@ fun ProjectsScreen(
     }
     LaunchedEffect(state.tasks) {
         focusTaskId = kairosPrefs.inProgressTaskId
+    }
+    LaunchedEffect(Unit) {
+        if (kairosPrefs.projectsCollapsed) kairosPrefs.projectsCollapsed = false
     }
     LaunchedEffect(pendingQuickAdd, consumePendingQuickAdd) {
         if (consumePendingQuickAdd && pendingQuickAdd) {
@@ -264,7 +285,10 @@ fun ProjectsScreen(
     val allBoardsList = remember(state.boards, state.projects, showArchivedBoards, needOverviewLists) {
         if (!needOverviewLists) emptyList()
         else state.boards
-            .filter { showArchivedBoards || !it.isArchived }
+            .filter {
+                (showArchivedBoards || !it.isArchived) &&
+                    !KanbanNames.isEisenhowerBoard(it.name)
+            }
             .sortedWith(
                 compareBy<Board> { board -> state.projects.find { it.id == board.projectId }?.name.orEmpty() }
                     .thenBy { it.name }
@@ -522,67 +546,33 @@ fun ProjectsScreen(
             }
         },
         floatingActionButton = {
-            Column(
-                horizontalAlignment = Alignment.End,
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+            Box(
+                modifier = Modifier
+                    .widthIn(max = 220.dp)
+                    .shadow(10.dp, CircleShape)
+                    .clip(CircleShape)
+                    .background(newProjectGradient)
+                    .border(1.dp, Color.White.copy(alpha = 0.35f), CircleShape)
+                    .clickable { isAddingProject = true }
+                    .padding(horizontal = 24.dp, vertical = 16.dp)
             ) {
-                Box(
-                    modifier = Modifier
-                        .widthIn(max = 220.dp)
-                        .shadow(8.dp, CircleShape)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.secondaryContainer)
-                        .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f), CircleShape)
-                        .clickable { isQuickAdding = true }
-                        .padding(horizontal = 18.dp, vertical = 14.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            Icons.Default.Bolt,
-                            contentDescription = s.quickAddTask,
-                            tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                            modifier = Modifier.size(22.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            s.quickAddTask,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer,
-                            fontWeight = FontWeight.SemiBold,
-                            style = MaterialTheme.typography.titleSmall,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f, fill = false)
-                        )
-                    }
-                }
-                Box(
-                    modifier = Modifier
-                        .widthIn(max = 220.dp)
-                        .shadow(10.dp, CircleShape)
-                        .clip(CircleShape)
-                        .background(newProjectGradient)
-                        .border(1.dp, Color.White.copy(alpha = 0.35f), CircleShape)
-                        .clickable { isAddingProject = true }
-                        .padding(horizontal = 24.dp, vertical = 16.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            Icons.Default.Add,
-                            contentDescription = s.createProject,
-                            tint = Color.White,
-                            modifier = Modifier.size(24.dp)
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Text(
-                            s.newProject,
-                            color = Color.White,
-                            fontWeight = FontWeight.Bold,
-                            style = MaterialTheme.typography.titleMedium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f, fill = false)
-                        )
-                    }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Default.Add,
+                        contentDescription = s.createProject,
+                        tint = Color.White,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        s.newProject,
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
                 }
             }
         },
@@ -767,15 +757,20 @@ fun ProjectsScreen(
                     ProjectCard(
                         project = project,
                         boards = state.boards.filter {
-                            it.projectId == project.id && (showArchivedBoards || !it.isArchived)
+                            it.projectId == project.id &&
+                                (showArchivedBoards || !it.isArchived) &&
+                                !KanbanNames.isEisenhowerBoard(it.name)
                         },
                         contacts = state.contacts.filter { it.projectId == project.id },
-                        expanded = expandedProjects[project.id] ?: !projectsCollapsed,
+                        expanded = expandedProjects[project.id] ?: true,
                         onToggleExpanded = {
-                            val currently = expandedProjects[project.id] ?: !projectsCollapsed
+                            val currently = expandedProjects[project.id] ?: true
                             expandedProjects[project.id] = !currently
                         },
                         onNavigateToBoard = { boardId -> onNavigateToBoard(boardId, null) },
+                        onOpenRecurring = { onNavigateToRecurring(project.id) },
+                        onOpenEisenhower = { onNavigateToEisenhower(project.id) },
+                        onOpenStats = { onNavigateToStats(project.id) },
                         onSetDefault = { board ->
                             if (board.isDefault) viewModel.clearDefaultBoard()
                             else viewModel.setDefaultBoard(board.id)
@@ -1013,6 +1008,7 @@ fun ProjectsScreen(
                             ),
                             modifier = Modifier.fillMaxWidth()
                         )
+                        DialogSectionDivider()
                         DueDateQuickPick(
                             selectedDueDate = quickAddDueDate,
                             onSelect = { quickAddDueDate = it },
@@ -1287,6 +1283,9 @@ fun ProjectCard(
     expanded: Boolean = true,
     onToggleExpanded: () -> Unit = {},
     onNavigateToBoard: (String) -> Unit,
+    onOpenRecurring: () -> Unit = {},
+    onOpenEisenhower: () -> Unit = {},
+    onOpenStats: () -> Unit = {},
     onSetDefault: (Board) -> Unit,
     onRenameProject: () -> Unit,
     onDeleteProject: () -> Unit,
@@ -1485,7 +1484,14 @@ fun ProjectCard(
                     )
                 }
             }
-            
+
+            Spacer(modifier = Modifier.height(6.dp))
+            RecurringProjectRow(onOpen = onOpenRecurring)
+            Spacer(modifier = Modifier.height(2.dp))
+            EisenhowerProjectRow(onOpen = onOpenEisenhower)
+            Spacer(modifier = Modifier.height(2.dp))
+            StatsProjectRow(onOpen = onOpenStats)
+
             Spacer(modifier = Modifier.height(14.dp))
             
             // Add Board Button (Large, prominent with color accent)
@@ -1545,6 +1551,126 @@ fun ProjectCard(
             }
             }
         }
+    }
+}
+
+@Composable
+private fun RecurringProjectRow(onOpen: () -> Unit) {
+    val s = LocalAppStrings.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(onClick = onOpen)
+            .padding(vertical = 10.dp, horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = Icons.Default.Repeat,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(22.dp)
+        )
+        Spacer(modifier = Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = s.recurringTitle,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = s.recurringRowHint,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        Icon(
+            imageVector = Icons.Default.KeyboardArrowRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun EisenhowerProjectRow(onOpen: () -> Unit) {
+    val s = LocalAppStrings.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(onClick = onOpen)
+            .padding(vertical = 10.dp, horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = Icons.Default.GridView,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(22.dp)
+        )
+        Spacer(modifier = Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = s.eisenhowerMatrixTitle,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = s.eisenhowerRowHint,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        Icon(
+            imageVector = Icons.Default.KeyboardArrowRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun StatsProjectRow(onOpen: () -> Unit) {
+    val s = LocalAppStrings.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(onClick = onOpen)
+            .padding(vertical = 10.dp, horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = Icons.Default.Insights,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(22.dp)
+        )
+        Spacer(modifier = Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = s.statsTitle,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = s.statsRowHint,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        Icon(
+            imageVector = Icons.Default.KeyboardArrowRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 
@@ -1806,6 +1932,7 @@ fun ContactDialog(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
+                DialogSectionDivider()
                 OutlinedTextField(
                     value = phone,
                     onValueChange = { phone = it },
@@ -1927,6 +2054,7 @@ private fun OverviewPanelDialog(
                                     }
                                 }
                             }
+                            DialogSectionDivider()
                         }
                         if (filteredAllTasks.isEmpty()) {
                             item {

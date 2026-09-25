@@ -10,10 +10,9 @@ import com.example.kaizenkanban.data.local.AppDatabase
 import com.example.kaizenkanban.data.local.KairosPreferences
 import com.example.kaizenkanban.data.repository.KanbanRepositoryImpl
 import com.example.kaizenkanban.domain.TaskCompletionGate
-import com.example.kaizenkanban.domain.model.TaskRepeatHelper
+import com.example.kaizenkanban.domain.model.TaskWorkflow
 import com.example.kaizenkanban.ui.calendar.localNoonForDayOffset
 import com.example.kaizenkanban.widget.KairosWidgetUpdater
-import java.util.UUID
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.withLock
 
@@ -39,42 +38,12 @@ object TaskQuickActions {
             listOf(
                 task.copy(
                     isCompleted = true,
-                    completedAt = completedAt
+                    completedAt = completedAt,
+                    workflowStatus = TaskWorkflow.DONE
                 )
             )
         )
-        var spawnedId: String? = null
-        val rule = task.repeatRule
-        if (rule != null) {
-            val recentSpawn = repo.getAllTasks().first()
-                .filter {
-                    !it.isCompleted &&
-                        it.title == task.title &&
-                        it.columnId == task.columnId &&
-                        it.repeatRule == rule &&
-                        it.id != task.id &&
-                        it.createdAt >= completedAt - 5_000
-                }
-                .maxByOrNull { it.createdAt }
-            if (recentSpawn != null) {
-                spawnedId = recentSpawn.id
-            } else {
-                spawnedId = UUID.randomUUID().toString()
-                val columnTasks = repo.getAllTasks().first().filter { it.columnId == task.columnId }
-                val nextPos = (columnTasks.maxOfOrNull { it.position } ?: -1) + 1
-                repo.insertTask(
-                    task.copy(
-                        id = spawnedId,
-                        isCompleted = false,
-                        completedAt = null,
-                        dueDate = TaskRepeatHelper.nextDueDate(task.dueDate, rule),
-                        position = nextPos,
-                        createdAt = System.currentTimeMillis(),
-                        linkedColumnIds = emptyList()
-                    )
-                )
-            }
-        }
+        // Legacy repeatRule auto-spawn disabled (recurring templates replace it).
         val prefs = KairosPreferences(appContext)
         if (prefs.inProgressTaskId == taskId) {
             prefs.inProgressTaskId = null
@@ -83,7 +52,7 @@ object TaskQuickActions {
         DueReminderScheduler.sync(appContext, tasks)
         dismissNotification(appContext, taskId)
         KairosWidgetUpdater.updateAll(appContext, tasks)
-        showUndoDoneNotification(appContext, taskId, task.title, spawnedId)
+        showUndoDoneNotification(appContext, taskId, task.title, spawnedTaskId = null)
         return true
     }
 
@@ -93,28 +62,17 @@ object TaskQuickActions {
             val appContext = context.applicationContext
             val repo = repository(appContext)
             val task = repo.getAllTasks().first().find { it.id == taskId } ?: return false
-            repo.updateTasks(listOf(task.copy(isCompleted = false, completedAt = null)))
-            val spawnId = spawnedTaskId?.takeIf { it.isNotBlank() }
-            if (spawnId != null) {
-                repo.deleteTask(spawnId)
-            } else if (task.repeatRule != null) {
-                val completedAt = task.completedAt
-                if (completedAt != null) {
-                    val orphan = repo.getAllTasks().first()
-                        .filter {
-                            !it.isCompleted &&
-                                it.id != taskId &&
-                                it.title == task.title &&
-                                it.columnId == task.columnId &&
-                                it.repeatRule == task.repeatRule &&
-                                it.createdAt >= completedAt - 5_000
-                        }
-                        .maxByOrNull { it.createdAt }
-                    if (orphan != null) {
-                        repo.deleteTask(orphan.id)
-                    }
-                }
-            }
+            repo.updateTasks(
+                listOf(
+                    task.copy(
+                        isCompleted = false,
+                        completedAt = null,
+                        workflowStatus = TaskWorkflow.OPEN,
+                        completionQuality = null
+                    )
+                )
+            )
+            spawnedTaskId?.takeIf { it.isNotBlank() }?.let { repo.deleteTask(it) }
             val tasks = repo.getAllTasks().first()
             DueReminderScheduler.sync(appContext, tasks)
             NotificationManagerCompat.from(appContext).cancel(UNDO_NOTIFY_BASE + taskId.hashCode())

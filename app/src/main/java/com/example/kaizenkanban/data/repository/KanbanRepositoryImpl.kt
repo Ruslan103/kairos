@@ -37,6 +37,7 @@ class KanbanRepositoryImpl(
             .map { it.id }
         boardIds.forEach { id -> deleteBoardInternal(id) }
         dao.deleteContactsByProject(projectId)
+        dao.deleteRecurringTemplatesByProject(projectId)
         dao.deleteProject(projectId)
     }
     override suspend fun renameProject(projectId: String, newName: String) = dao.renameProject(projectId, newName)
@@ -77,10 +78,18 @@ class KanbanRepositoryImpl(
                 dao.clearDefaultBoards()
                 val candidates = boards.filter { it.id != boardId && !it.isArchived }
                 val next = candidates.firstOrNull {
-                    it.projectId == board.projectId && it.name.contains("OKR", ignoreCase = true)
+                    it.projectId == board.projectId && (
+                        it.name.contains("OKR", ignoreCase = true) ||
+                            it.name.contains("Лестница целей", ignoreCase = true) ||
+                            it.name.contains("Goal ladder", ignoreCase = true)
+                        )
                 }
                     ?: candidates.firstOrNull { it.projectId == board.projectId }
-                    ?: candidates.firstOrNull { it.name.contains("OKR", ignoreCase = true) }
+                    ?: candidates.firstOrNull {
+                        it.name.contains("OKR", ignoreCase = true) ||
+                            it.name.contains("Лестница целей", ignoreCase = true) ||
+                            it.name.contains("Goal ladder", ignoreCase = true)
+                    }
                     ?: candidates.firstOrNull()
                 if (next != null) {
                     dao.setDefaultBoard(next.id)
@@ -113,6 +122,7 @@ class KanbanRepositoryImpl(
     override suspend fun updateTasks(tasks: List<Task>) = dao.updateTasks(tasks.map { it.toEntity() })
     override suspend fun deleteTask(taskId: String) {
         dao.deleteCommentsByTask(taskId)
+        dao.deleteTaskLinksForTask(taskId)
         dao.deleteTask(taskId)
     }
     override suspend fun deleteTasksByColumn(columnId: String) = dao.deleteTasksByColumn(columnId)
@@ -136,6 +146,44 @@ class KanbanRepositoryImpl(
     override suspend fun deleteContact(contactId: String) = dao.deleteContact(contactId)
     override suspend fun deleteContactsByProject(projectId: String) = dao.deleteContactsByProject(projectId)
 
+    // Recurring templates
+    override fun getAllRecurringTemplates(): Flow<List<RecurringTemplate>> =
+        dao.getAllRecurringTemplates().map { list -> list.map { it.toDomain() } }
+
+    override suspend fun insertRecurringTemplate(template: RecurringTemplate) =
+        dao.insertRecurringTemplate(template.toEntity())
+
+    override suspend fun updateRecurringTemplate(template: RecurringTemplate) =
+        dao.updateRecurringTemplate(template.toEntity())
+
+    override suspend fun deleteRecurringTemplate(templateId: String) =
+        dao.deleteRecurringTemplate(templateId)
+
+    override suspend fun deleteRecurringTemplatesByProject(projectId: String) =
+        dao.deleteRecurringTemplatesByProject(projectId)
+
+    // Task links
+    override fun getAllTaskLinks(): Flow<List<TaskLink>> =
+        dao.getAllTaskLinks().map { list -> list.map { it.toDomain() } }
+
+    override suspend fun insertTaskLink(link: TaskLink) =
+        dao.insertTaskLink(link.toEntity())
+
+    override suspend fun deleteTaskLink(parentId: String, childId: String) =
+        dao.deleteTaskLink(parentId, childId)
+
+    override suspend fun deleteTaskLinksForTask(taskId: String) =
+        dao.deleteTaskLinksForTask(taskId)
+
+    override fun getAllStatsJournal(): Flow<List<StatsJournalEntry>> =
+        dao.getAllStatsJournal().map { list -> list.map { it.toDomain() } }
+
+    override suspend fun insertStatsJournal(entry: StatsJournalEntry) =
+        dao.insertStatsJournal(entry.toEntity())
+
+    override suspend fun deleteStatsJournal(id: String) =
+        dao.deleteStatsJournal(id)
+
     private suspend fun removeColumnsAndContents(columnIds: Set<String>) {
         if (columnIds.isEmpty()) return
         val allTasks = dao.getAllTasks().first()
@@ -154,6 +202,7 @@ class KanbanRepositoryImpl(
             when {
                 primaryRemoved && links.isEmpty() -> {
                     dao.deleteCommentsByTask(task.id)
+                    dao.deleteTaskLinksForTask(task.id)
                     dao.deleteTask(task.id)
                 }
                 primaryRemoved -> {

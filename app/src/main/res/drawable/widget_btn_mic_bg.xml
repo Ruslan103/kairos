@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Legacy idle bg; mic button now uses widget_mic_idle layer-list. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+    <gradient
+        android:angle="135"
+        android:endColor="#A855F7"
+        android:startColor="#4F46E5"
+        android:type="linear" />
+</shape>

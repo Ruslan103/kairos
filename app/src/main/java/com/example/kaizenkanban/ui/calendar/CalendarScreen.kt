@@ -52,7 +52,6 @@ import com.example.kaizenkanban.ui.i18n.AppStrings
 import com.example.kaizenkanban.ui.i18n.LocalAppLanguage
 import com.example.kaizenkanban.ui.i18n.LocalAppStrings
 import com.example.kaizenkanban.ui.theme.eisenhowerSolid
-import com.example.kaizenkanban.ui.theme.getStatusBrush
 import com.example.kaizenkanban.ui.viewmodel.SharedViewModel
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -109,12 +108,23 @@ fun Long.relativeDueLabel(
 ): String {
     if (isCompleted) return formatDateShort(locale)
     val start = startOfLocalDayMillis(now)
-    return when {
+    val dayLabel = when {
         this < start -> strings.dueOverdue
         this < start + DAY_MS -> strings.dueToday
         this < start + 2 * DAY_MS -> strings.dueTomorrow
         else -> formatDateShort(locale)
     }
+    val time = formatDueClock(this)
+    return if (time != null) "$dayLabel $time" else dayLabel
+}
+
+/** HH:mm when the due instant has a meaningful clock time (not midnight). */
+private fun formatDueClock(millis: Long): String? {
+    val cal = java.util.Calendar.getInstance().apply { timeInMillis = millis }
+    val hour = cal.get(java.util.Calendar.HOUR_OF_DAY)
+    val minute = cal.get(java.util.Calendar.MINUTE)
+    if (hour == 0 && minute == 0) return null
+    return String.format("%02d:%02d", hour, minute)
 }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -604,7 +614,6 @@ private fun CalendarTaskCard(
     val state by viewModel.state.collectAsState()
     val s = LocalAppStrings.current
     val dateLocale = LocalAppLanguage.current.locale
-    val category = state.categories.find { it.id == task.categoryId }
     val isOverdue = !task.isCompleted && task.dueDate != null && task.dueDate.isOverdueDate()
     val homeColumn = state.columns.find { it.id == task.columnId }
         ?: state.columns.find { it.id in task.linkedColumnIds }
@@ -742,21 +751,6 @@ private fun CalendarTaskCard(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    if (category != null) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(modifier = Modifier.size(14.dp).clip(CircleShape).background(getStatusBrush(category.color)))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = category.name.let { s.localized(it) },
-                                style = MaterialTheme.typography.bodySmall,
-                                fontWeight = FontWeight.Medium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.widthIn(max = 140.dp)
-                            )
-                        }
-                    }
                     Text(
                         text = task.dueDate?.relativeDueLabel(s, dateLocale, task.isCompleted).orEmpty(),
                         style = MaterialTheme.typography.bodySmall,

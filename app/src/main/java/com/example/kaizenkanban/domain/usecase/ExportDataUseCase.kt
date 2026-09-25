@@ -14,6 +14,7 @@ class ExportDataUseCase(private val repository: KanbanRepository) {
         val comments = repository.getAllComments().first()
         val columnComments = repository.getAllColumnComments().first()
         val contacts = repository.getAllContacts().first()
+        val taskLinks = repository.getAllTaskLinks().first()
 
         return KairosTransferData(
             version = 1,
@@ -26,7 +27,8 @@ class ExportDataUseCase(private val repository: KanbanRepository) {
             tasks = tasks,
             comments = comments,
             columnComments = columnComments,
-            contacts = contacts
+            contacts = contacts,
+            taskLinks = taskLinks
         )
     }
 }

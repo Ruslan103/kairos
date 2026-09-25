@@ -4,6 +4,8 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <queries>
         <intent>
@@ -17,6 +19,9 @@
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="https" android:host="t.me" />
+        </intent>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
         </intent>
     </queries>
 
@@ -78,6 +83,7 @@
             android:exported="true">
             <intent-filter>
                 <action android:name="com.example.kaizenkanban.action.DUE_REMINDER" />
+                <action android:name="com.example.kaizenkanban.action.ENSURE_RECURRING" />
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
         </receiver>
@@ -86,18 +92,6 @@
         <receiver
             android:name=".reminders.ReminderActionReceiver"
             android:exported="false" />
-
-        <receiver
-            android:name=".widget.KairosWidgetProvider"
-            android:exported="true"
-            android:label="@string/widget_title">
-            <intent-filter>
-                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-            </intent-filter>
-            <meta-data
-                android:name="android.appwidget.provider"
-                android:resource="@xml/kairos_widget_info" />
-        </receiver>
 
         <receiver
             android:name=".widget.KairosFocusWidgetProvider"
@@ -109,6 +103,14 @@
             <meta-data
                 android:name="android.appwidget.provider"
                 android:resource="@xml/kairos_focus_widget_info" />
+        </receiver>
+
+        <receiver
+            android:name=".voice.VoiceWidgetReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.example.kaizenkanban.action.START_VOICE_CAPTURE" />
+            </intent-filter>
         </receiver>
 
     </application>

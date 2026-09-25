@@ -51,7 +51,61 @@ data class TaskEntity(
     val isHidden: Boolean = false,
     val linkedColumnIds: String = "",
     val repeatRule: String? = null,
-    val reminderMinutesOfDay: Int? = null
+    val reminderMinutesOfDay: Int? = null,
+    val recurringTemplateId: String? = null,
+    val complexity: Int? = null,
+    val estimatedMinutes: Int? = null,
+    val completionQuality: Int? = null,
+    val workflowStatus: String = "open",
+    val isBoardArchived: Boolean = false,
+    val statsExcluded: Boolean = false,
+    val isGoal: Boolean = false,
+    val goalStatsEpochMillis: Long? = null
+)
+
+@Entity(tableName = "stats_journal")
+data class StatsJournalEntity(
+    @PrimaryKey val id: String,
+    val projectId: String,
+    val sourceTaskId: String,
+    val title: String,
+    val kind: String,
+    val eventAt: Long,
+    val complexity: Int? = null,
+    val completionQuality: Int? = null,
+    val eisenhowerQuadrant: String? = null,
+    val weight: Int = 1,
+    val leafScore: Float = 0f,
+    val towardGoal: Boolean = false,
+    /** Comma-separated goal task ids this entry counts toward. */
+    val relatedGoalIds: String = "",
+    val recurringTemplateId: String? = null,
+    val createdAt: Long
+)
+
+@Entity(tableName = "recurring_templates")
+data class RecurringTemplateEntity(
+    @PrimaryKey val id: String,
+    val projectId: String,
+    val title: String,
+    /** daily | weekdays (legacy: times_per_week normalized on read) */
+    val rhythm: String,
+    val timesPerWeek: Int? = null,
+    /** Comma-separated ISO weekdays 1=Mon … 7=Sun */
+    val weekdays: String = "",
+    val targetBoardId: String,
+    val targetColumnId: String,
+    val enabled: Boolean = true,
+    /** Comma-separated minutes from midnight, e.g. "540,900,1260" */
+    val reminderTimesOfDay: String = "540",
+    val eisenhowerQuadrant: String? = null,
+    val showEisenhowerButtons: Boolean = false,
+    /** Comma-separated parent task ids for spawned instances */
+    val linkParentIds: String = "",
+    /** Comma-separated child task ids for spawned instances */
+    val linkChildIds: String = "",
+    val complexity: Int? = null,
+    val createdAt: Long
 )
 
 @Entity(tableName = "comments")
@@ -79,4 +133,14 @@ data class ContactEntity(
     val email: String = "",
     val role: String = "",
     val position: Int = 0
+)
+
+@Entity(
+    tableName = "task_links",
+    primaryKeys = ["parentId", "childId"]
+)
+data class TaskLinkEntity(
+    val parentId: String,
+    val childId: String,
+    val createdAt: Long = 0L
 )

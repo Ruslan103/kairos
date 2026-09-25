@@ -61,4 +61,22 @@ interface KanbanRepository {
     suspend fun insertContacts(contacts: List<Contact>)
     suspend fun deleteContact(contactId: String)
     suspend fun deleteContactsByProject(projectId: String)
+
+    // Recurring templates
+    fun getAllRecurringTemplates(): Flow<List<RecurringTemplate>>
+    suspend fun insertRecurringTemplate(template: RecurringTemplate)
+    suspend fun updateRecurringTemplate(template: RecurringTemplate)
+    suspend fun deleteRecurringTemplate(templateId: String)
+    suspend fun deleteRecurringTemplatesByProject(projectId: String)
+
+    // Task links (DAG)
+    fun getAllTaskLinks(): Flow<List<TaskLink>>
+    suspend fun insertTaskLink(link: TaskLink)
+    suspend fun deleteTaskLink(parentId: String, childId: String)
+    suspend fun deleteTaskLinksForTask(taskId: String)
+
+    // Stats journal
+    fun getAllStatsJournal(): Flow<List<StatsJournalEntry>>
+    suspend fun insertStatsJournal(entry: StatsJournalEntry)
+    suspend fun deleteStatsJournal(id: String)
 }

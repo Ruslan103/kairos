@@ -11,5 +11,6 @@ data class KairosTransferData(
     val tasks: List<Task> = emptyList(),
     val comments: List<Comment> = emptyList(),
     val columnComments: List<ColumnComment> = emptyList(),
-    val contacts: List<Contact> = emptyList()
+    val contacts: List<Contact> = emptyList(),
+    val taskLinks: List<TaskLink> = emptyList()
 )

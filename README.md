@@ -5,7 +5,7 @@
 [![Room](https://img.shields.io/badge/Room%20DB-2.6.1-orange?style=flat&logo=sqlite&logoColor=white)](https://developer.android.com/training/data-storage/room)
 [![Architecture](https://img.shields.io/badge/Architecture-Clean%20%2B%20SOLID%20%2B%20MVVM-success)](#архитектура)
 [![API](https://img.shields.io/badge/Min%20SDK-26%2B-brightgreen)](https://android-arsenal.com/api?level=26)
-[![Version](https://img.shields.io/badge/Version-1.1.9-blue)](app/build.gradle.kts)
+[![Version](https://img.shields.io/badge/Version-1.2.0-blue)](app/build.gradle.kts)
 [![License: Non-Commercial](https://img.shields.io/badge/License-Non--Commercial-orange.svg)](LICENSE)
 
 **Язык:** [Русский](README.md) · [English](README.en.md)
@@ -61,8 +61,7 @@
 - Канал уведомлений Android; действия «Готово» / «На завтра» / «Отмена».
 
 ### Виджеты
-- **Kairos** — фокус + срочные/сегодняшние задачи + быстрое добавление.
-- **Kairos Фокус** — только задача «В работе».
+- **Kairos** — задача «В работе»; без фокуса — крупные кнопки добавить задачу и голос.
 - Добавить: долгий тап по рабочему столу → виджеты → Kairos.
 
 ### Статусы, комментарии, контакты
@@ -87,7 +86,7 @@
 3. ⚡ — взять в работу (отобразится на виджете).
 4. «Ещё» на доске → основной хаб, список хабов, сортировка, просроченные.
 5. В проектах отметьте **основную доску**; в Настройках — куда падает быстрая задача и время напоминаний.
-6. Добавьте виджет на домашний экран для фокуса и дедлайнов.
+6. Добавьте виджет на домашний экран для фокуса или быстрого голоса/задачи.
 
 ---
 
@@ -100,7 +99,7 @@ app/src/main/java/com/example/kaizenkanban/
 ├── data/           # Room, DAO, prefs, repository, transfer (.kairos)
 ├── domain/         # модели, интерфейсы, use cases
 ├── reminders/      # дедлайн-алерты, быстрые действия из уведомлений
-├── widget/         # App Widget (список + фокус)
+├── widget/         # Виджет фокуса (+ быстрая задача / голос)
 └── ui/
     ├── board/      # канбан / хабы
     ├── calendar/
@@ -121,7 +120,7 @@ app/src/main/java/com/example/kaizenkanban/
 
 - Kotlin 2.1.0, Jetpack Compose Material 3, Room 2.6.1 + KSP
 - Coroutines / Flow / StateFlow, Navigation Compose, WindowSizeClass
-- Gradle Kotlin DSL, AGP 8.3.2 · Min SDK 26 · Target / Compile SDK 34 · app **1.1.9**
+- Gradle Kotlin DSL, AGP 8.3.2 · Min SDK 26 · Target / Compile SDK 34 · app **1.2.0**
 
 ---
 

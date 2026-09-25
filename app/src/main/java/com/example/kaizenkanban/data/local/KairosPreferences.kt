@@ -1,6 +1,7 @@
 package com.example.kaizenkanban.data.local
 
 import android.content.Context
+import java.util.Calendar
 
 class KairosPreferences(context: Context) {
     private val prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -16,8 +17,31 @@ class KairosPreferences(context: Context) {
     var inProgressTaskId: String?
         get() = prefs.getString(KEY_IN_PROGRESS_TASK, null)?.takeIf { it.isNotBlank() }
         set(value) {
+            if (!value.isNullOrBlank()) recordFocusDay(System.currentTimeMillis())
             prefs.edit().putString(KEY_IN_PROGRESS_TASK, value.orEmpty()).apply()
         }
+
+    /** Local midnight millis for days when focus was activated (last ~400). */
+    fun focusDayStarts(): Set<Long> =
+        prefs.getStringSet(KEY_FOCUS_DAYS, emptySet()).orEmpty()
+            .mapNotNull { it.toLongOrNull() }
+            .toSet()
+
+    fun recordFocusDay(nowMillis: Long = System.currentTimeMillis()) {
+        val dayStart = Calendar.getInstance().apply {
+            timeInMillis = nowMillis
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+        val next = (focusDayStarts() + dayStart)
+            .sortedDescending()
+            .take(400)
+            .map { it.toString() }
+            .toSet()
+        prefs.edit().putStringSet(KEY_FOCUS_DAYS, next).apply()
+    }
 
     var scheduledReminderTaskIds: Set<String>
         get() = prefs.getStringSet(KEY_REMINDER_TASKS, emptySet()).orEmpty()
@@ -128,6 +152,71 @@ class KairosPreferences(context: Context) {
         get() = prefs.getInt(KEY_DB_SEED_VERSION, 0)
         set(value) = prefs.edit().putInt(KEY_DB_SEED_VERSION, value).apply()
 
+    /**
+     * PRO unlock stub (default on). Replace with Play Billing / license key later.
+     */
+    var proUnlocked: Boolean
+        get() = prefs.getBoolean(KEY_PRO_UNLOCKED, true)
+        set(value) = prefs.edit().putBoolean(KEY_PRO_UNLOCKED, value).apply()
+
+    /** Widget mic is actively capturing (for red / pulse visuals). */
+    var voiceListeningActive: Boolean
+        get() = prefs.getBoolean(KEY_VOICE_LISTENING, false)
+        set(value) {
+            // commit(): widget update must read the new value immediately (apply() races).
+            prefs.edit().putBoolean(KEY_VOICE_LISTENING, value).commit()
+        }
+
+    /**
+     * Soft stats epoch (millis). Null / 0 → default: Jan 1 of the current local year.
+     * Completions before this are ignored in Review.
+     */
+    var statsEpochMillis: Long
+        get() {
+            val stored = prefs.getLong(KEY_STATS_EPOCH, 0L)
+            return if (stored > 0L) stored else defaultStatsEpochMillis()
+        }
+        set(value) = prefs.edit().putLong(KEY_STATS_EPOCH, value.coerceAtLeast(0L)).apply()
+
+    fun defaultStatsEpochMillis(now: Long = System.currentTimeMillis()): Long {
+        val cal = Calendar.getInstance().apply {
+            timeInMillis = now
+            set(Calendar.MONTH, Calendar.JANUARY)
+            set(Calendar.DAY_OF_MONTH, 1)
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+        return cal.timeInMillis
+    }
+
+    fun resetStatsEpochToDefault() {
+        prefs.edit().putLong(KEY_STATS_EPOCH, defaultStatsEpochMillis()).apply()
+    }
+
+    /** Move epoch forward so the given period no longer counts (soft reset). */
+    fun advanceStatsEpochTo(millis: Long) {
+        statsEpochMillis = millis.coerceAtLeast(statsEpochMillis)
+    }
+
+    fun pinnedStatsGoalIds(projectId: String): Set<String> =
+        prefs.getStringSet(pinnedGoalsKey(projectId), emptySet()).orEmpty()
+
+    fun setPinnedStatsGoalIds(projectId: String, ids: Set<String>) {
+        prefs.edit().putStringSet(pinnedGoalsKey(projectId), ids).apply()
+    }
+
+    fun hiddenStatsGoalIds(projectId: String): Set<String> =
+        prefs.getStringSet(hiddenGoalsKey(projectId), emptySet()).orEmpty()
+
+    fun setHiddenStatsGoalIds(projectId: String, ids: Set<String>) {
+        prefs.edit().putStringSet(hiddenGoalsKey(projectId), ids).apply()
+    }
+
+    private fun pinnedGoalsKey(projectId: String) = "$KEY_PINNED_GOALS_PREFIX$projectId"
+    private fun hiddenGoalsKey(projectId: String) = "$KEY_HIDDEN_GOALS_PREFIX$projectId"
+
     private fun primaryHubKey(boardId: String) = "$KEY_PRIMARY_HUB_PREFIX$boardId"
 
     private companion object {
@@ -135,6 +224,7 @@ class KairosPreferences(context: Context) {
         const val KEY_LANGUAGE = "app_language"
         const val KEY_ENTER_ADDS_TASK = "enter_adds_task"
         const val KEY_IN_PROGRESS_TASK = "in_progress_task_id"
+        const val KEY_FOCUS_DAYS = "focus_day_starts"
         const val KEY_REMINDER_TASKS = "reminder_task_ids"
         const val KEY_REMINDER_HOUR = "reminder_hour"
         const val KEY_REMINDER_MINUTE = "reminder_minute"
@@ -151,5 +241,10 @@ class KairosPreferences(context: Context) {
         const val KEY_EISENHOWER_BOARD_ID = "eisenhower_board_id"
         const val KEY_PRIMARY_HUB_PREFIX = "primary_hub_"
         const val KEY_DB_SEED_VERSION = "db_seed_version"
+        const val KEY_PRO_UNLOCKED = "pro_unlocked"
+        const val KEY_VOICE_LISTENING = "voice_listening_active"
+        const val KEY_STATS_EPOCH = "stats_epoch_millis"
+        const val KEY_PINNED_GOALS_PREFIX = "stats_pinned_goals_"
+        const val KEY_HIDDEN_GOALS_PREFIX = "stats_hidden_goals_"
     }
 }

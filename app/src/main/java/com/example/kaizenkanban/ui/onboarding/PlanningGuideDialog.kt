@@ -1,9 +1,7 @@
 package com.example.kaizenkanban.ui.onboarding
 
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -17,6 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.example.kaizenkanban.ui.components.DialogSectionDivider
 import com.example.kaizenkanban.ui.i18n.LocalAppStrings
 
 @Composable
@@ -52,7 +51,7 @@ fun PlanningGuideDialog(
                     .verticalScroll(rememberScrollState())
             ) {
                 sections.forEachIndexed { index, (heading, body) ->
-                    if (index > 0) Spacer(modifier = Modifier.height(14.dp))
+                    if (index > 0) DialogSectionDivider()
                     if (heading != null) {
                         Text(
                             text = heading,
@@ -61,7 +60,6 @@ fun PlanningGuideDialog(
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis
                         )
-                        Spacer(modifier = Modifier.height(6.dp))
                     }
                     Text(
                         text = body,

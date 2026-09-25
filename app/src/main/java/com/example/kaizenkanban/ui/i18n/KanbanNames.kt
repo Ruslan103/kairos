@@ -4,12 +4,16 @@ object KanbanNames {
     fun isEisenhowerBoard(name: String?): Boolean {
         val n = name.orEmpty()
         return n.contains("Эйзенхауэр", ignoreCase = true) ||
-            n.contains("Eisenhower", ignoreCase = true)
+            n.contains("Eisenhower", ignoreCase = true) ||
+            n.contains("Приоритеты", ignoreCase = true) ||
+            n.equals("Priorities", ignoreCase = true)
     }
 
     fun isOkrBoard(name: String?): Boolean {
         val n = name.orEmpty()
-        return n.contains("OKR", ignoreCase = true)
+        return n.contains("OKR", ignoreCase = true) ||
+            n.contains("Лестница целей", ignoreCase = true) ||
+            n.contains("Goal ladder", ignoreCase = true)
     }
 
     fun isUncategorized(name: String?): Boolean {

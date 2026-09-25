@@ -1,3 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Kairos</string>
     <string name="widget_title">Kairos</string>
@@ -5,8 +6,9 @@
     <string name="widget_due_section">Today / overdue</string>
     <string name="widget_done">Done</string>
     <string name="widget_empty">No focus or due tasks</string>
-    <string name="widget_quick_add">+</string>
-    <string name="widget_description">Focus task and today\'s due items</string>
-    <string name="widget_focus_description">Focus task only</string>
-    <string name="widget_focus_only_title">Kairos Focus</string>
+    <string name="widget_quick_add">Add</string>
+    <string name="widget_add_task">Add task</string>
+    <string name="widget_voice">Dictate task</string>
+    <string name="widget_focus_description">Focus task, or add / dictate a task</string>
+    <string name="widget_focus_only_title">Kairos</string>
 </resources>

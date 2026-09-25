@@ -70,6 +70,25 @@ val deleteButtonGradient = Brush.linearGradient(
 
 val deleteButtonColor = Color(0xFFE1306C)
 
+/** Line/bar accents for stats charts — same family as action gradients. */
+val chartProgress = Color(0xFF0095F6)
+val chartForecast = Color(0xFFE1306C)
+val chartToward = Color(0xFF0095F6)
+val chartTrivia = Color(0xFF8B5CF6)
+
+val chartProgressBrush = Brush.horizontalGradient(
+    colors = listOf(Color(0xFF0095F6), Color(0xFF833AB4))
+)
+val chartForecastBrush = Brush.horizontalGradient(
+    colors = listOf(Color(0xFFE1306C), Color(0xFFF77737))
+)
+val chartTowardBrush = Brush.verticalGradient(
+    colors = listOf(Color(0xFF38BDF8), Color(0xFF0095F6))
+)
+val chartTriviaBrush = Brush.verticalGradient(
+    colors = listOf(Color(0xFFC084FC), Color(0xFF8B5CF6))
+)
+
 // Helper to generate a smooth, vibrant gradient for each status
 fun getStatusBrush(colorLong: Long): Brush {
     val base = Color(colorLong)

@@ -26,12 +26,16 @@ data class AppState(
     val comments: List<Comment> = emptyList(),
     val columnComments: List<ColumnComment> = emptyList(),
     val contacts: List<Contact> = emptyList(),
+    val recurringTemplates: List<RecurringTemplate> = emptyList(),
+    val taskLinks: List<TaskLink> = emptyList(),
+    val statsJournal: List<StatsJournalEntry> = emptyList(),
     val isInitialized: Boolean = false
 )
 
 private data class DeletedTaskSnapshot(
     val task: Task,
-    val comments: List<Comment>
+    val comments: List<Comment>,
+    val links: List<TaskLink> = emptyList()
 )
 
 private data class CoreKanbanData(
@@ -59,7 +63,8 @@ class SharedViewModel(
     private val deleteColumnCommentUseCase: DeleteColumnCommentUseCase,
     private val moveTaskToBoardUseCase: MoveTaskToBoardUseCase,
     private val exportDataUseCase: ExportDataUseCase,
-    private val importDataUseCase: ImportDataUseCase
+    private val importDataUseCase: ImportDataUseCase,
+    private val ensureRecurringInstancesUseCase: EnsureRecurringInstancesUseCase
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(AppState())
@@ -90,8 +95,39 @@ class SharedViewModel(
     private val _pendingQuickAdd = MutableStateFlow(false)
     val pendingQuickAdd: StateFlow<Boolean> = _pendingQuickAdd.asStateFlow()
 
+    private val _pendingVoiceAssistant = MutableStateFlow(false)
+    val pendingVoiceAssistant: StateFlow<Boolean> = _pendingVoiceAssistant.asStateFlow()
+
+    private val _pendingAddTask = MutableStateFlow(false)
+    val pendingAddTask: StateFlow<Boolean> = _pendingAddTask.asStateFlow()
+
     fun requestQuickAdd() {
         _pendingQuickAdd.value = true
+    }
+
+    fun requestVoiceAssistant() {
+        _pendingVoiceAssistant.value = true
+    }
+
+    fun requestAddTask() {
+        _pendingAddTask.value = true
+    }
+
+    /** Returns true once if a voice request was pending (clears the flag). */
+    fun consumePendingVoiceAssistant(): Boolean {
+        if (!_pendingVoiceAssistant.value) return false
+        _pendingVoiceAssistant.value = false
+        return true
+    }
+
+    fun clearPendingVoiceAssistant() {
+        _pendingVoiceAssistant.value = false
+    }
+
+    fun consumePendingAddTask(): Boolean {
+        if (!_pendingAddTask.value) return false
+        _pendingAddTask.value = false
+        return true
     }
 
     fun clearPendingQuickAdd() {
@@ -125,38 +161,63 @@ class SharedViewModel(
                 updateTaskUseCase(
                     latest.copy(
                         isCompleted = true,
-                        completedAt = completedAt
+                        completedAt = completedAt,
+                        workflowStatus = TaskWorkflow.DONE
                     )
                 )
-                val spawnedId = spawnNextOccurrenceIfNeeded(latest, completedAt)
-                completedUndos[latest.id] = CompletedUndo(latest, completedAt, spawnedId)
+                // Legacy repeatRule auto-spawn disabled (recurring templates replace it).
+                completedUndos[latest.id] = CompletedUndo(latest, completedAt, spawnedTaskId = null)
                 trimCompletedUndos()
             } else {
-                val undo = completedUndos.remove(latest.id)
-                updateTaskUseCase(latest.copy(isCompleted = false, completedAt = null))
-                val spawnId = undo?.spawnedTaskId
-                if (spawnId != null) {
-                    deleteTaskUseCase(spawnId)
-                } else if (latest.repeatRule != null) {
-                    val completedAt = latest.completedAt ?: undo?.completedAt
-                    if (completedAt != null) {
-                        val spawned = repository.getAllTasks().first()
-                            .filter {
-                                !it.isCompleted &&
-                                    it.title == latest.title &&
-                                    it.columnId == latest.columnId &&
-                                    it.repeatRule == latest.repeatRule &&
-                                    it.id != latest.id &&
-                                    it.createdAt >= completedAt - 5_000
-                            }
-                            .maxByOrNull { it.createdAt }
-                        if (spawned != null) {
-                            deleteTaskUseCase(spawned.id)
-                        }
-                    }
-                }
+                completedUndos.remove(latest.id)
+                updateTaskUseCase(
+                    latest.copy(
+                        isCompleted = false,
+                        completedAt = null,
+                        workflowStatus = TaskWorkflow.OPEN,
+                        completionQuality = null
+                    )
+                )
             }
             willBeCompleted
+        }
+    }
+
+    fun markTaskNotDone(task: Task) {
+        viewModelScope.launch {
+            withAllTaskLocks {
+                val latest = repository.getAllTasks().first().find { it.id == task.id } ?: return@withAllTaskLocks
+                updateTaskUseCase(
+                    latest.copy(
+                        isCompleted = false,
+                        completedAt = null,
+                        workflowStatus = TaskWorkflow.NOT_DONE,
+                        completionQuality = null
+                    )
+                )
+            }
+        }
+    }
+
+    fun clearTaskNotDone(task: Task) {
+        viewModelScope.launch {
+            withAllTaskLocks {
+                val latest = repository.getAllTasks().first().find { it.id == task.id } ?: return@withAllTaskLocks
+                if (latest.workflowStatus != TaskWorkflow.NOT_DONE) return@withAllTaskLocks
+                updateTaskUseCase(latest.copy(workflowStatus = TaskWorkflow.OPEN))
+            }
+        }
+    }
+
+    fun setTaskCompletionQuality(taskId: String, quality: Int?) {
+        viewModelScope.launch {
+            withAllTaskLocks {
+                val latest = repository.getAllTasks().first().find { it.id == taskId } ?: return@withAllTaskLocks
+                if (!latest.isCompleted) return@withAllTaskLocks
+                updateTaskUseCase(
+                    latest.copy(completionQuality = quality?.coerceIn(1, 5))
+                )
+            }
         }
     }
 
@@ -164,25 +225,15 @@ class SharedViewModel(
         viewModelScope.launch {
             withAllTaskLocks {
                 val undo = completedUndos.remove(taskId) ?: return@withAllTaskLocks
-                updateTaskUseCase(undo.snapshot.copy(isCompleted = false, completedAt = null))
-                val spawnId = undo.spawnedTaskId
-                if (spawnId != null) {
-                    deleteTaskUseCase(spawnId)
-                } else if (undo.snapshot.repeatRule != null) {
-                    val spawned = _state.value.tasks
-                        .filter {
-                            !it.isCompleted &&
-                                it.title == undo.snapshot.title &&
-                                it.columnId == undo.snapshot.columnId &&
-                                it.repeatRule == undo.snapshot.repeatRule &&
-                                it.id != undo.snapshot.id &&
-                                it.createdAt >= undo.completedAt - 5_000
-                        }
-                        .maxByOrNull { it.createdAt }
-                    if (spawned != null) {
-                        deleteTaskUseCase(spawned.id)
-                    }
-                }
+                updateTaskUseCase(
+                    undo.snapshot.copy(
+                        isCompleted = false,
+                        completedAt = null,
+                        workflowStatus = TaskWorkflow.OPEN,
+                        completionQuality = null
+                    )
+                )
+                undo.spawnedTaskId?.let { deleteTaskUseCase(it) }
             }
         }
     }
@@ -192,39 +243,6 @@ class SharedViewModel(
             val oldest = completedUndos.keys.firstOrNull() ?: break
             completedUndos.remove(oldest)
         }
-    }
-
-    private suspend fun spawnNextOccurrenceIfNeeded(completed: Task, completedAt: Long = System.currentTimeMillis()): String? {
-        val rule = completed.repeatRule ?: return null
-        val allTasks = repository.getAllTasks().first()
-        val recentSpawn = allTasks
-            .filter {
-                !it.isCompleted &&
-                    it.title == completed.title &&
-                    it.columnId == completed.columnId &&
-                    it.repeatRule == rule &&
-                    it.id != completed.id &&
-                    it.createdAt >= completedAt - 5_000
-            }
-            .maxByOrNull { it.createdAt }
-        if (recentSpawn != null) return recentSpawn.id
-
-        val nextDue = TaskRepeatHelper.nextDueDate(completed.dueDate, rule)
-        val columnTasks = allTasks.filter { it.columnId == completed.columnId }
-        val nextPos = (columnTasks.maxOfOrNull { it.position } ?: -1) + 1
-        val spawnedId = UUID.randomUUID().toString()
-        repository.insertTask(
-            completed.copy(
-                id = spawnedId,
-                isCompleted = false,
-                completedAt = null,
-                dueDate = nextDue,
-                position = nextPos,
-                createdAt = System.currentTimeMillis(),
-                linkedColumnIds = emptyList()
-            )
-        )
-        return spawnedId
     }
 
     init {
@@ -249,6 +267,16 @@ class SharedViewModel(
                 Triple(core, comments, colComments)
             }.combine(repository.getAllContacts()) { triple, contacts ->
                 val (core, comments, colComments) = triple
+                Pair(Triple(core, comments, colComments), contacts)
+            }.combine(repository.getAllRecurringTemplates()) { pair, templates ->
+                Pair(pair, templates)
+            }.combine(repository.getAllTaskLinks()) { pair, links ->
+                Pair(pair, links)
+            }.combine(repository.getAllStatsJournal()) { pair, journal ->
+                val (triplePair, links) = pair
+                val (inner, templates) = triplePair
+                val (triple, contacts) = inner
+                val (core, comments, colComments) = triple
                 AppState(
                     projects = core.projects,
                     boards = core.boards,
@@ -258,13 +286,86 @@ class SharedViewModel(
                     comments = comments,
                     columnComments = colComments,
                     contacts = contacts,
+                    recurringTemplates = templates,
+                    taskLinks = links,
+                    statsJournal = journal,
                     isInitialized = true
                 )
             }.collect { fullState ->
                 _state.value = fullState
             }
         }
+
+        viewModelScope.launch {
+            state
+                .map { it.isInitialized }
+                .distinctUntilChanged()
+                .collect { ready ->
+                    if (ready) ensureTodayRecurringInstances()
+                }
+        }
     }
+
+    fun ensureTodayRecurringInstances() {
+        viewModelScope.launch {
+            val s = _state.value
+            ensureRecurringInstancesUseCase(
+                templates = s.recurringTemplates,
+                tasks = s.tasks,
+                columns = s.columns
+            )
+        }
+    }
+
+    fun upsertRecurringTemplate(template: RecurringTemplate) {
+        viewModelScope.launch {
+            val existing = _state.value.recurringTemplates.any { it.id == template.id }
+            if (existing) repository.updateRecurringTemplate(template)
+            else repository.insertRecurringTemplate(template)
+            ensureTodayRecurringInstances()
+        }
+    }
+
+    fun setRecurringTemplateEnabled(templateId: String, enabled: Boolean) {
+        viewModelScope.launch {
+            val current = _state.value.recurringTemplates.find { it.id == templateId } ?: return@launch
+            repository.updateRecurringTemplate(current.copy(enabled = enabled))
+            if (enabled) ensureTodayRecurringInstances()
+        }
+    }
+
+    fun deleteRecurringTemplate(templateId: String) {
+        viewModelScope.launch {
+            repository.deleteRecurringTemplate(templateId)
+        }
+    }
+
+    /** Returns false if the link would create a cycle (or is invalid). */
+    fun addTaskLink(parentId: String, childId: String): Boolean {
+        val links = _state.value.taskLinks
+        if (TaskLinkGraph.wouldCreateCycle(links, parentId, childId)) return false
+        if (links.any { it.parentId == parentId && it.childId == childId }) return true
+        viewModelScope.launch {
+            repository.insertTaskLink(
+                TaskLink(
+                    parentId = parentId,
+                    childId = childId,
+                    createdAt = System.currentTimeMillis()
+                )
+            )
+        }
+        return true
+    }
+
+    fun removeTaskLink(parentId: String, childId: String) {
+        viewModelScope.launch {
+            repository.deleteTaskLink(parentId, childId)
+        }
+    }
+
+    fun wouldCreateTaskLinkCycle(parentId: String, childId: String): Boolean =
+        TaskLinkGraph.wouldCreateCycle(_state.value.taskLinks, parentId, childId)
+
 
     // Projects
     fun addProject(name: String) {
@@ -369,7 +470,7 @@ class SharedViewModel(
     fun isProtectedBoard(board: Board): Boolean {
         if (board.isDefault) return true
         val n = board.name
-        return n.contains("OKR", ignoreCase = true) ||
+        return KanbanNames.isOkrBoard(n) ||
             KanbanNames.isEisenhowerBoard(n)
     }
 
@@ -395,10 +496,10 @@ class SharedViewModel(
             val next = candidates.firstOrNull {
                 current != null &&
                     it.projectId == current.projectId &&
-                    it.name.contains("OKR", ignoreCase = true)
+                    KanbanNames.isOkrBoard(it.name)
             }
                 ?: candidates.firstOrNull { current != null && it.projectId == current.projectId }
-                ?: candidates.firstOrNull { it.name.contains("OKR", ignoreCase = true) }
+                ?: candidates.firstOrNull { KanbanNames.isOkrBoard(it.name) }
                 ?: candidates.firstOrNull()
                 ?: current
             next?.let { repository.setDefaultBoard(it.id) }
@@ -441,11 +542,14 @@ class SharedViewModel(
         currentTasks: List<Task>,
         eisenhowerQuadrant: String? = null,
         showEisenhowerButtons: Boolean = true,
-        repeatRule: String? = null,
-        reminderMinutesOfDay: Int? = null
+        reminderMinutesOfDay: Int? = null,
+        complexity: Int? = null,
+        estimatedMinutes: Int? = null,
+        parentIds: List<String> = emptyList(),
+        childIds: List<String> = emptyList()
     ) {
         viewModelScope.launch {
-            addTaskUseCase(
+            val taskId = addTaskUseCase(
                 title,
                 columnId,
                 categoryId,
@@ -453,9 +557,33 @@ class SharedViewModel(
                 currentTasks,
                 eisenhowerQuadrant,
                 showEisenhowerButtons,
-                repeatRule,
-                reminderMinutesOfDay
-            )
+                reminderMinutesOfDay = reminderMinutesOfDay,
+                complexity = complexity,
+                estimatedMinutes = estimatedMinutes
+            ) ?: return@launch
+            val working = _state.value.taskLinks.toMutableList()
+            parentIds.distinct().forEach { parentId ->
+                if (parentId == taskId) return@forEach
+                if (TaskLinkGraph.wouldCreateCycle(working, parentId, taskId)) return@forEach
+                val link = TaskLink(
+                    parentId = parentId,
+                    childId = taskId,
+                    createdAt = System.currentTimeMillis()
+                )
+                repository.insertTaskLink(link)
+                working += link
+            }
+            childIds.distinct().forEach { childId ->
+                if (childId == taskId) return@forEach
+                if (TaskLinkGraph.wouldCreateCycle(working, taskId, childId)) return@forEach
+                val link = TaskLink(
+                    parentId = taskId,
+                    childId = childId,
+                    createdAt = System.currentTimeMillis()
+                )
+                repository.insertTaskLink(link)
+                working += link
+            }
         }
     }
 
@@ -525,52 +653,203 @@ class SharedViewModel(
 
     fun clearCompletedTasks(columnId: String) {
         viewModelScope.launch {
-            val columns = _state.value.columns
-            val boards = _state.value.boards
-            val column = columns.find { it.id == columnId } ?: return@launch
-            val board = boards.find { it.id == column.boardId }
-            val isEisenhower = isEisenhowerBoardName(board?.name)
-            val boardCols = columns.filter { it.boardId == column.boardId }.sortedBy { it.position }
-            val index = boardCols.indexOfFirst { it.id == columnId }
-            val quadrant = if (isEisenhower && index >= 0) quadrantForHub(column, index) else null
-
             completedTasksInHub(columnId).forEach { task ->
-                if (task.columnId == columnId) {
-                    val otherLinks = task.linkedColumnIds.filter { it != columnId }
-                    if (otherLinks.isEmpty() && task.eisenhowerQuadrant == null) {
-                        deleteTaskUseCase(task.id)
-                    } else if (otherLinks.isNotEmpty()) {
-                        // Keep mirrors elsewhere: rehome to first link instead of wiping everywhere.
-                        val newHome = otherLinks.first()
-                        moveTaskUseCase(
-                            task.copy(
-                                linkedColumnIds = otherLinks.drop(1),
-                                isCompleted = true
-                            ),
-                            newHome,
-                            _state.value.tasks.count { it.columnId == newHome && it.id != task.id },
-                            _state.value.tasks
-                        )
-                    } else {
-                        // Home here but only matrix appearance elsewhere — clear home completed by delete.
-                        deleteTaskUseCase(task.id)
-                    }
-                    return@forEach
-                }
-                // Clear every appearance reason (link and/or quadrant) so the task leaves the hub.
-                var updated = task
-                var changed = false
-                if (task.linkedColumnIds.contains(columnId)) {
-                    updated = updated.copy(linkedColumnIds = updated.linkedColumnIds.filter { it != columnId })
-                    changed = true
-                }
-                if (isEisenhower && quadrant != null && task.eisenhowerQuadrant == quadrant) {
-                    updated = updated.copy(eisenhowerQuadrant = null)
-                    changed = true
-                }
-                if (changed) updateTaskUseCase(updated)
+                archiveTaskOffHub(task, columnId, completed = true)
             }
         }
+    }
+
+    fun clearNotDoneTasks(columnId: String) {
+        viewModelScope.launch {
+            notDoneTasksInHub(columnId).forEach { task ->
+                archiveTaskOffHub(task, columnId, completed = false)
+            }
+        }
+    }
+
+    private fun completedTasksInHub(columnId: String): List<Task> {
+        val columns = _state.value.columns
+        val boards = _state.value.boards
+        val column = columns.find { it.id == columnId } ?: return emptyList()
+        val board = boards.find { it.id == column.boardId }
+        val isEisenhower = isEisenhowerBoardName(board?.name)
+        val boardCols = columns.filter { it.boardId == column.boardId }.sortedBy { it.position }
+        val index = boardCols.indexOfFirst { it.id == columnId }
+        val quadrant = if (isEisenhower && index >= 0) quadrantForHub(column, index) else null
+        return _state.value.tasks.filter { task ->
+            if (!task.isCompleted || task.isBoardArchived) return@filter false
+            if (isEisenhower && quadrant != null) {
+                val homeProjectId = columns.find { it.id == task.columnId }
+                    ?.let { col -> boards.find { it.id == col.boardId }?.projectId }
+                (homeProjectId == null || homeProjectId == board?.projectId) && (
+                    (task.columnId == columnId && task.eisenhowerQuadrant == null) ||
+                        task.eisenhowerQuadrant == quadrant ||
+                        task.linkedColumnIds.contains(columnId)
+                    )
+            } else {
+                task.isOnColumn(columnId)
+            }
+        }
+    }
+
+    private fun notDoneTasksInHub(columnId: String): List<Task> {
+        val columns = _state.value.columns
+        val boards = _state.value.boards
+        val column = columns.find { it.id == columnId } ?: return emptyList()
+        val board = boards.find { it.id == column.boardId }
+        val isEisenhower = isEisenhowerBoardName(board?.name)
+        val boardCols = columns.filter { it.boardId == column.boardId }.sortedBy { it.position }
+        val index = boardCols.indexOfFirst { it.id == columnId }
+        val quadrant = if (isEisenhower && index >= 0) quadrantForHub(column, index) else null
+        return _state.value.tasks.filter { task ->
+            if (!task.isNotDone || task.isBoardArchived) return@filter false
+            if (isEisenhower && quadrant != null) {
+                val homeProjectId = columns.find { it.id == task.columnId }
+                    ?.let { col -> boards.find { it.id == col.boardId }?.projectId }
+                (homeProjectId == null || homeProjectId == board?.projectId) && (
+                    (task.columnId == columnId && task.eisenhowerQuadrant == null) ||
+                        task.eisenhowerQuadrant == quadrant ||
+                        task.linkedColumnIds.contains(columnId)
+                    )
+            } else {
+                task.isOnColumn(columnId)
+            }
+        }
+    }
+
+    private suspend fun archiveTaskOffHub(task: Task, columnId: String, completed: Boolean) {
+        val columns = _state.value.columns
+        val boards = _state.value.boards
+        val column = columns.find { it.id == columnId } ?: return
+        val board = boards.find { it.id == column.boardId }
+        val isEisenhower = isEisenhowerBoardName(board?.name)
+        val boardCols = columns.filter { it.boardId == column.boardId }.sortedBy { it.position }
+        val index = boardCols.indexOfFirst { it.id == columnId }
+        val quadrant = if (isEisenhower && index >= 0) quadrantForHub(column, index) else null
+
+        if (task.columnId == columnId) {
+            val otherLinks = task.linkedColumnIds.filter { it != columnId }
+            when {
+                otherLinks.isEmpty() -> {
+                    updateTaskUseCase(
+                        task.copy(
+                            isBoardArchived = true,
+                            linkedColumnIds = emptyList(),
+                            eisenhowerQuadrant = if (completed) null else task.eisenhowerQuadrant
+                        )
+                    )
+                }
+                else -> {
+                    val newHome = otherLinks.first()
+                    moveTaskUseCase(
+                        task.copy(
+                            linkedColumnIds = otherLinks.drop(1),
+                            isBoardArchived = true,
+                            isCompleted = completed || task.isCompleted
+                        ),
+                        newHome,
+                        _state.value.tasks.count { it.columnId == newHome && it.id != task.id },
+                        _state.value.tasks
+                    )
+                }
+            }
+            return
+        }
+        var updated = task
+        var changed = false
+        if (task.linkedColumnIds.contains(columnId)) {
+            updated = updated.copy(linkedColumnIds = updated.linkedColumnIds.filter { it != columnId })
+            changed = true
+        }
+        if (isEisenhower && quadrant != null && task.eisenhowerQuadrant == quadrant) {
+            updated = updated.copy(eisenhowerQuadrant = null)
+            changed = true
+        }
+        // If no remaining board presence for this appearance-only clear, still leave task;
+        // full archive when home was cleared above.
+        if (changed) updateTaskUseCase(updated)
+    }
+
+    fun resetGoalStatsEpoch(goalId: String) {
+        viewModelScope.launch {
+            withAllTaskLocks {
+                val latest = _state.value.tasks.find { it.id == goalId } ?: return@withAllTaskLocks
+                if (!latest.isGoal) return@withAllTaskLocks
+                updateTaskUseCase(latest.copy(goalStatsEpochMillis = System.currentTimeMillis()))
+            }
+        }
+    }
+
+    fun setTaskStatsExcluded(taskId: String, excluded: Boolean) {
+        viewModelScope.launch {
+            withAllTaskLocks {
+                val latest = _state.value.tasks.find { it.id == taskId } ?: return@withAllTaskLocks
+                updateTaskUseCase(latest.copy(statsExcluded = excluded))
+            }
+        }
+    }
+
+    fun deleteArchivedTaskToJournal(taskId: String, projectId: String) {
+        viewModelScope.launch {
+            withAllTaskLocks {
+                val task = _state.value.tasks.find { it.id == taskId } ?: return@withAllTaskLocks
+                val kind = when {
+                    task.isCompleted -> StatsJournalEntry.KIND_DONE
+                    task.isNotDone -> StatsJournalEntry.KIND_NOT_DONE
+                    else -> null
+                }
+                val projectTasks = projectTasksFor(projectId)
+                if (!task.statsExcluded && kind != null) {
+                    val entry = com.example.kaizenkanban.domain.stats.ProjectStatsCalculator.journalFromTask(
+                        task = task,
+                        projectId = projectId,
+                        links = _state.value.taskLinks,
+                        projectTasks = projectTasks,
+                        kind = kind
+                    )
+                    repository.insertStatsJournal(entry)
+                }
+                deleteTaskUseCase(task.id)
+            }
+        }
+    }
+
+    /** Journal all archived tasks (that count in stats), then delete them from Archive. */
+    fun clearArchiveToJournal(projectId: String) {
+        viewModelScope.launch {
+            withAllTaskLocks {
+                val projectTasks = projectTasksFor(projectId)
+                val archived = projectTasks.filter { it.isBoardArchived }
+                if (archived.isEmpty()) return@withAllTaskLocks
+                val links = _state.value.taskLinks
+                archived.forEach { task ->
+                    if (!task.statsExcluded) {
+                        val kind = when {
+                            task.isCompleted -> StatsJournalEntry.KIND_DONE
+                            task.isNotDone -> StatsJournalEntry.KIND_NOT_DONE
+                            else -> null
+                        }
+                        if (kind != null) {
+                            val entry = com.example.kaizenkanban.domain.stats.ProjectStatsCalculator.journalFromTask(
+                                task = task,
+                                projectId = projectId,
+                                links = links,
+                                projectTasks = projectTasks,
+                                kind = kind
+                            )
+                            repository.insertStatsJournal(entry)
+                        }
+                    }
+                    deleteTaskUseCase(task.id)
+                }
+            }
+        }
+    }
+
+    private fun projectTasksFor(projectId: String): List<Task> {
+        val boardIds = _state.value.boards.filter { it.projectId == projectId }.map { it.id }.toSet()
+        val columnIds = _state.value.columns.filter { it.boardId in boardIds }.map { it.id }.toSet()
+        return _state.value.tasks.filter { it.columnId in columnIds }
     }
 
     fun addColumn(title: String, boardId: String, currentColumns: List<Column>) {
@@ -615,7 +894,8 @@ class SharedViewModel(
                 val task = _state.value.tasks.find { it.id == taskId } ?: return@withAllTaskLocks
                 deletedSnapshots[taskId] = DeletedTaskSnapshot(
                     task = task,
-                    comments = _state.value.comments.filter { it.taskId == taskId }
+                    comments = _state.value.comments.filter { it.taskId == taskId },
+                    links = _state.value.taskLinks.filter { it.parentId == taskId || it.childId == taskId }
                 )
                 deleteTaskUseCase(taskId)
             }
@@ -628,6 +908,7 @@ class SharedViewModel(
                 val snapshot = deletedSnapshots.remove(taskId) ?: return@withAllTaskLocks
                 repository.insertTask(snapshot.task)
                 snapshot.comments.forEach { repository.insertComment(it) }
+                snapshot.links.forEach { repository.insertTaskLink(it) }
             }
         }
     }
@@ -802,31 +1083,6 @@ class SharedViewModel(
         moveTaskUseCase(task, targetColumnId, newPosition, allTasks, targetVisibleOrder)
     }
 
-    private fun completedTasksInHub(columnId: String): List<Task> {
-        val columns = _state.value.columns
-        val boards = _state.value.boards
-        val column = columns.find { it.id == columnId } ?: return emptyList()
-        val board = boards.find { it.id == column.boardId }
-        val isEisenhower = isEisenhowerBoardName(board?.name)
-        val boardCols = columns.filter { it.boardId == column.boardId }.sortedBy { it.position }
-        val index = boardCols.indexOfFirst { it.id == columnId }
-        val quadrant = if (isEisenhower && index >= 0) quadrantForHub(column, index) else null
-        return _state.value.tasks.filter { task ->
-            if (!task.isCompleted) return@filter false
-            if (isEisenhower && quadrant != null) {
-                val homeProjectId = columns.find { it.id == task.columnId }
-                    ?.let { col -> boards.find { it.id == col.boardId }?.projectId }
-                (homeProjectId == null || homeProjectId == board?.projectId) && (
-                    (task.columnId == columnId && task.eisenhowerQuadrant == null) ||
-                        task.eisenhowerQuadrant == quadrant ||
-                        task.linkedColumnIds.contains(columnId)
-                    )
-            } else {
-                task.isOnColumn(columnId)
-            }
-        }
-    }
-
     private suspend fun linkTaskToColumn(task: Task, targetColumnId: String) {
         val latest = _state.value.tasks.find { it.id == task.id } ?: task
         val columns = _state.value.columns
@@ -979,7 +1235,8 @@ class SharedViewModel(
             comments = full.comments.filter { it.taskId in taskIds },
             columnComments = full.columnComments.filter { it.columnId in columnIds },
             contacts = full.contacts.filter { it.projectId == projectId },
-            categories = full.categories.filter { it.id in categoryIds }
+            categories = full.categories.filter { it.id in categoryIds },
+            taskLinks = full.taskLinks.filter { it.parentId in taskIds && it.childId in taskIds }
         )
     }
 
@@ -1023,7 +1280,8 @@ class SharedViewModelFactory(
     private val deleteColumnCommentUseCase: DeleteColumnCommentUseCase,
     private val moveTaskToBoardUseCase: MoveTaskToBoardUseCase,
     private val exportDataUseCase: ExportDataUseCase,
-    private val importDataUseCase: ImportDataUseCase
+    private val importDataUseCase: ImportDataUseCase,
+    private val ensureRecurringInstancesUseCase: EnsureRecurringInstancesUseCase
 ) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(SharedViewModel::class.java)) {
@@ -1032,7 +1290,7 @@ class SharedViewModelFactory(
                 repository, initializeDatabaseUseCase, addTaskUseCase, updateTaskUseCase, moveTaskUseCase,
                 addColumnUseCase, deleteColumnUseCase, renameColumnUseCase, deleteTaskUseCase, setDefaultBoardUseCase,
                 addCommentUseCase, deleteCommentUseCase, addColumnCommentUseCase, deleteColumnCommentUseCase,
-                moveTaskToBoardUseCase, exportDataUseCase, importDataUseCase
+                moveTaskToBoardUseCase, exportDataUseCase, importDataUseCase, ensureRecurringInstancesUseCase
             ) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")

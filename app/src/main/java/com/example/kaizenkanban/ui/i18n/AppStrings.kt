@@ -11,11 +11,19 @@ class AppStrings(private val appLanguage: AppLanguage) {
 
     fun localized(stored: String): String = NAME_MAP[appLanguage]?.get(stored.trim()) ?: stored
 
-    fun eisenhowerTitle(quadrant: String?): String = when (quadrant) {
+fun eisenhowerTitle(quadrant: String?): String = when (quadrant) {
         Eisenhower.Q1 -> t("Urgent and important", "Срочно и важно")
         Eisenhower.Q2 -> t("Important, not urgent", "Важно, не срочно")
         Eisenhower.Q3 -> t("Urgent, not important", "Срочно, не важно")
         Eisenhower.Q4 -> t("Not urgent and not important", "Не срочно и не важно")
+        else -> ""
+    }
+
+    fun eisenhowerTitleShort(quadrant: String?): String = when (quadrant) {
+        Eisenhower.Q1 -> t("Urgent\nImportant", "Срочно\nВажно")
+        Eisenhower.Q2 -> t("Important\nNot urgent", "Важно\nНе срочно")
+        Eisenhower.Q3 -> t("Urgent\nNot important", "Срочно\nНе важно")
+        Eisenhower.Q4 -> t("Not urgent\nNot important", "Не срочно\nНе важно")
         else -> ""
     }
 
@@ -87,6 +95,61 @@ class AppStrings(private val appLanguage: AppLanguage) {
     val contacts get() = t("Contacts", "Контакты")
     val noContacts get() = t("No contacts yet. Add people on this project.", "Нет контактов. Добавьте людей проекта.")
     val addContact get() = t("Add contact", "Добавить контакт")
+
+    // Recurring templates (project-owned)
+    val recurringTitle get() = t("Recurring", "Регулярные")
+    val recurringRowHint get() = t("Habits for this project", "Привычки этого проекта")
+    val eisenhowerMatrixTitle get() = t("Priorities", "Приоритеты")
+    val eisenhowerRowHint get() = t("Urgent × important matrix", "Срочно × важно")
+    val eisenhowerMatrixHint get() = t(
+        "Tap a cell for its tasks. ⋮ moves a task.",
+        "Нажмите ячейку — список задач. ⋮ — переместить."
+    )
+    val eisenhowerAxisUrgent get() = t("Urgent", "Срочно")
+    val eisenhowerAxisNotUrgent get() = t("Not urgent", "Не срочно")
+    fun eisenhowerCount(n: Int) = t("$n tasks", "$n задач")
+    val eisenhowerEmptyCell get() = t("Empty", "Пусто")
+    val eisenhowerMove get() = t("Move in matrix", "Переместить в матрице")
+    val eisenhowerClearQuadrant get() = t("Remove from matrix", "Убрать из матрицы")
+    fun eisenhowerUntaggedHint(n: Int) = t(
+        "$n open tasks without a quadrant — set Q1–Q4 on the card.",
+        "$n открытых задач без квадранта — поставьте Q1–Q4 на карточке."
+    )
+    val recurringAdd get() = t("Add recurring", "Добавить регулярную")
+    val recurringEdit get() = t("Edit recurring", "Регулярная задача")
+    val recurringEmpty get() = t("No recurring tasks yet", "Пока нет регулярных задач")
+    val recurringEmptyHint get() = t(
+        "Templates live with the project. Instances appear in the chosen hub.",
+        "Шаблоны принадлежат проекту. Экземпляры появляются в выбранном хабе."
+    )
+    val recurringRhythm get() = t("Rhythm", "Ритм")
+    val recurringDaily get() = t("Every day", "Каждый день")
+    val recurringWeekdays get() = t("On weekdays", "По дням")
+    val recurringEveryNDays get() = t("Every N days", "Каждые N дней")
+    fun recurringEveryNDaysLabel(n: Int) = t("Every $n days", "Каждые $n дн.")
+    val recurringIntervalDays get() = t("Interval (days)", "Интервал (дни)")
+    val recurringDestination get() = t("Create instances in", "Куда создавать")
+    val recurringTime get() = t("Times", "Времена")
+    val recurringTimePick get() = t("Pick time", "Выбрать время")
+    val recurringTimeAdd get() = t("Add time", "ещё время")
+    val recurringTimeHint get() = t(
+        "Tap a time to change it. Use × to remove. Each time creates a separate task that day.",
+        "Нажмите на время, чтобы изменить. × — убрать. Каждое время — отдельная задача на день."
+    )
+    val recurringActive get() = t("Active", "Активна")
+    val recurringNoBoards get() = t("Add a board in this project first", "Сначала добавьте доску в проект")
+    val recurringDeleteConfirm get() = t(
+        "Delete this recurring template? Today's instances already created stay as normal tasks.",
+        "Удалить этот шаблон? Уже созданные на сегодня задачи останутся обычными."
+    )
+    val weekdayMon get() = t("Mon", "Пн")
+    val weekdayTue get() = t("Tue", "Вт")
+    val weekdayWed get() = t("Wed", "Ср")
+    val weekdayThu get() = t("Thu", "Чт")
+    val weekdayFri get() = t("Fri", "Пт")
+    val weekdaySat get() = t("Sat", "Сб")
+    val weekdaySun get() = t("Sun", "Вс")
+    val taskTitleLabel get() = t("Title", "Название")
     val primaryBoard get() = t("Primary", "Основная")
     val boardMenu get() = t("Board menu", "Меню доски")
     val unsetPrimary get() = t("Remove from primary", "Убрать из основных")
@@ -128,20 +191,23 @@ class AppStrings(private val appLanguage: AppLanguage) {
         "Sometimes you stay busy all day and still feel like nothing really moved. Often the tasks and the bigger goal sit apart.\n\nIn Kairos you can keep today’s step and the bigger goal in one picture. Then it’s easier to choose what to do — and the day feels less wasted.\n\nYou don’t have to plan only this way. Make other projects and boards for work, home, study — whatever fits. Below is one approach that works well when you’re tired of checking off tasks with no sense of progress.",
         "Бывает так: весь день что-то делал, а к вечеру непонятно, к чему это было. Часто задачи сами по себе, а большая цель — где-то отдельно.\n\nВ Kairos можно держать и шаг на сегодня, и большую цель в одной картине. Тогда проще выбирать, за что браться, и меньше чувства зря потраченного дня.\n\nТак планировать не обязательно. Можно завести другие проекты и доски — под работу, дом, учёбу — как удобно. Ниже один вариант, который заходит, когда надоело закрывать задачи без ощущения прогресса."
     )
-    val planningGuideHubsTitle get() = t("OKR hubs — from step to main goal", "Хабы OKR — от шага к главной цели")
+    val planningGuideHubsTitle get() = t(
+        "Goal ladder hubs — from step to main goal",
+        "Хабы лестницы целей — от шага к главной цели"
+    )
     val planningGuideHubsBody get() = t(
-        "Left to right: from a concrete step to the main goal.\n\n• Today — for this day (e.g. leave work on time)\n• Soon — next few days (e.g. two evenings this week without work)\n• Ongoing — what you want to keep (e.g. not working late every night)\n• Main Goal — what it’s all for (e.g. quiet evenings when your head is free)\n\nA normal to-do list is usually one flat layer. Here, while the main goal sits on the right, it’s easier not to drown in small stuff. And while “Today” sits on the left, the main goal doesn’t stay only in your head.",
-        "Слева направо: от конкретного шага к главной цели.\n\n• Сегодня — на этот день (например, уйти с работы вовремя)\n• Скоро — на ближайшие дни (например, два вечера на неделе без работы)\n• Постоянно — то, что хочешь держать (например, не сидеть до ночи за задачами)\n• Главная цель — зачем всё это (например, спокойные вечера, когда голова свободна)\n\nВ обычном to-do всё лежит одним слоем. Тут другое: пока справа есть главная цель, легче не тонуть в мелочи. А пока слева есть «сегодня», цель не остаётся только в голове."
+        "Left to right: from a parked wait to the main goal.\n\n• Waiting on others — blocked on someone else\n• Do — for this day (e.g. leave work on time)\n• Planning — next few days (e.g. two evenings this week without work)\n• Holding course — what you want to keep (e.g. not working late every night)\n• Main Goal — what it’s all for (e.g. quiet evenings when your head is free)\n\nA normal to-do list is usually one flat layer. Here, while the main goal sits on the right, it’s easier not to drown in small stuff. And while “Do” sits near the left, the main goal doesn’t stay only in your head.",
+        "Слева направо: от ожидания ответа к главной цели.\n\n• На стороне контрагента — ждёт другого человека\n• Сделать — на этот день (например, уйти с работы вовремя)\n• Планирую — на ближайшие дни (например, два вечера на неделе без работы)\n• Держу курс — то, что хочешь держать (например, не сидеть до ночи за задачами)\n• Главная цель — зачем всё это (например, спокойные вечера, когда голова свободна)\n\nВ обычном to-do всё лежит одним слоем. Тут другое: пока справа есть главная цель, легче не тонуть в мелочи. А пока слева есть «Сделать», цель не остаётся только в голове."
     )
     val planningGuideDayTitle get() = t("During the day", "Как пользоваться днём")
     val planningGuideDayBody get() = t(
-        "1. Look at Today and Soon.\n2. Don’t pack the day full.\n3. Pick one task, turn on In progress, finish it.\n4. Then take the next one.\n\nThat’s the difference from jumping across ten tasks: with one in focus there’s less noise, and a better chance to finish what matters.\n\nDon’t keep new ideas in your head — quick-add them and return to the current task.\nWrite concrete steps: not “sort out work”, but “send the email” or “finish the report”.",
-        "1. Посмотри «Сегодня» и «Скоро».\n2. Не набивай день под завязку.\n3. Выбери одно дело, включи «В работе» и сделай его.\n4. Потом бери следующее.\n\nВ этом отличие от прыжков по десяти задачам сразу: пока одно в фокусе, меньше шума в голове и выше шанс закрыть важное.\n\nНовую мысль не крути в уме — запиши быстрой задачей и вернись к текущему.\nПиши конкретно: не «разобраться с работой», а «отправить письмо» или «закрыть отчёт»."
+        "1. Look at Do and Planning.\n2. Don’t pack the day full.\n3. Pick one task, turn on In progress, finish it.\n4. Then take the next one.\n\nThat’s the difference from jumping across ten tasks: with one in focus there’s less noise, and a better chance to finish what matters.\n\nDon’t keep new ideas in your head — quick-add them and return to the current task.\nWrite concrete steps: not “sort out work”, but “send the email” or “finish the report”.",
+        "1. Посмотри «Сделать» и «Планирую».\n2. Не набивай день под завязку.\n3. Выбери одно дело, включи «В работе» и сделай его.\n4. Потом бери следующее.\n\nВ этом отличие от прыжков по десяти задачам сразу: пока одно в фокусе, меньше шума в голове и выше шанс закрыть важное.\n\nНовую мысль не крути в уме — запиши быстрой задачей и вернись к текущему.\nПиши конкретно: не «разобраться с работой», а «отправить письмо» или «закрыть отчёт»."
     )
     val planningGuideRhythmTitle get() = t("Morning, evening, week", "Утро, вечер, неделя")
     val planningGuideRhythmBody get() = t(
-        "Morning. What from Soon moves into Today? Turn on In progress.\nEvening. Mark what’s done. Move, delete, or leave the rest for tomorrow.\nOnce a week. Check Ongoing and Main Goal. Open the Eisenhower matrix: is everything only urgent while the important waits again?\n\nThis is where many people feel the difference: by week’s end you see not only how much you did, but where you moved.",
-        "Утро. Что из «Скоро» перенесёшь в «Сегодня»? Включи «В работе».\nВечер. Отметь сделанное. Что не успел — перенеси, удали или оставь на завтра.\nРаз в неделю. Глянь «Постоянно» и «Главную цель». И матрицу Эйзенхауэра: не забито ли всё только срочным, пока важное снова ждёт.\n\nМногие здесь ловят разницу: к концу недели видно не только сколько сделал, а куда сдвинулся."
+        "Morning. What from Planning moves into Do? Turn on In progress.\nEvening. Mark what’s done. Move, delete, or leave the rest for tomorrow.\nOnce a week. Check Holding course and Main Goal. Open the Eisenhower matrix: is everything only urgent while the important waits again?\n\nThis is where many people feel the difference: by week’s end you see not only how much you did, but where you moved.",
+        "Утро. Что из «Планирую» перенесёшь в «Сделать»? Включи «В работе».\nВечер. Отметь сделанное. Что не успел — перенеси, удали или оставь на завтра.\nРаз в неделю. Глянь «Держу курс» и «Главную цель». И матрицу Эйзенхауэра: не забито ли всё только срочным, пока важное снова ждёт.\n\nМногие здесь ловят разницу: к концу недели видно не только сколько сделал, а куда сдвинулся."
     )
     val planningGuideOwnTitle get() = t("If you want it your way", "Если хочешь по-своему")
     val planningGuideOwnBody get() = t(
@@ -150,9 +216,85 @@ class AppStrings(private val appLanguage: AppLanguage) {
     )
     val planningGuideStartTitle get() = t("Where to start", "С чего начать")
     val planningGuideStartBody get() = t(
-        "1. Write the Main Goal in a short line.\n2. In Ongoing — a habit toward it.\n3. In Soon — what to do in the next few days.\n4. In Today — one step for this day.\n5. Turn on In progress and do it.\n\nTry that for one evening — then compare the feeling with ticking off ten list items. Often you won’t want to go back to a bare list.",
-        "1. Напиши «Главную цель» коротко.\n2. В «Постоянно» — привычку к ней.\n3. В «Скоро» — что сделать в ближайшие дни.\n4. В «Сегодня» — один шаг на этот день.\n5. Включи «В работе» и сделай его.\n\nСделай так один вечер — и сам сравнишь ощущение с обычным «вычеркнуть десять пунктов». Часто после этого возвращаться к голому списку уже не хочется."
+        "1. Write the Main Goal in a short line.\n2. In Holding course — a habit toward it.\n3. In Planning — what to do in the next few days.\n4. In Do — one step for this day.\n5. Turn on In progress and do it.\n\nTry that for one evening — then compare the feeling with ticking off ten list items. Often you won’t want to go back to a bare list.",
+        "1. Напиши «Главную цель» коротко.\n2. В «Держу курс» — привычку к ней.\n3. В «Планирую» — что сделать в ближайшие дни.\n4. В «Сделать» — один шаг на этот день.\n5. Включи «В работе» и сделай его.\n\nСделай так один вечер — и сам сравнишь ощущение с обычным «вычеркнуть десять пунктов». Часто после этого возвращаться к голому списку уже не хочется."
     )
+
+    val gesturesGuideOpen get() = t("Taps and swipes", "Нажатия и жесты")
+    val gesturesGuideTitle get() = t("How do I…?", "Как сделать…?")
+    val gesturesGuideOpenProjectsTitle get() = t(
+        "How do I open all my projects?",
+        "Как открыть все проекты?"
+    )
+    val gesturesGuideOpenProjectsBody get() = t(
+        "Double-tap the board name at the top of the screen.",
+        "Дважды нажмите на название доски вверху экрана."
+    )
+    val gesturesGuideSwitchListsTitle get() = t(
+        "How do I switch to another list of tasks?",
+        "Как перейти к другому списку задач?"
+    )
+    val gesturesGuideSwitchListsBody get() = t(
+        "Swipe left or right with your finger.",
+        "Проведите пальцем влево или вправо."
+    )
+    val gesturesGuideShowMenuTitle get() = t(
+        "How do I show or hide the top menu?",
+        "Как показать или спрятать верхнее меню?"
+    )
+    val gesturesGuideShowMenuBody get() = t(
+        "Pull the task list down — the menu appears.\nDouble-tap the list name — the menu hides or shows again.",
+        "Потяните список задач вниз — меню появится.\nДважды нажмите на название списка — меню скроется или снова покажется."
+    )
+    val gesturesGuideMoveTaskTitle get() = t(
+        "How do I move a task?",
+        "Как переместить задачу?"
+    )
+    val gesturesGuideMoveTaskBody get() = t(
+        "Hold the card with your finger, then drag it to a new place or another list.",
+        "Удерживайте карточку пальцем и перетащите в нужное место или в другой список."
+    )
+    val gesturesGuideEditTaskTitle get() = t(
+        "How do I rename a task?",
+        "Как изменить название задачи?"
+    )
+    val gesturesGuideEditTaskBody get() = t(
+        "Double-tap the task text.",
+        "Дважды нажмите на текст задачи."
+    )
+    val gesturesGuideLongTitleTitle get() = t(
+        "How do I read a long title in full?",
+        "Как прочитать длинное название целиком?"
+    )
+    val gesturesGuideLongTitleBody get() = t(
+        "Tap the text once — it will scroll. Tap again to stop.",
+        "Нажмите на текст один раз — он побежит. Нажмите ещё раз, чтобы остановить."
+    )
+    val gesturesGuideMoreActionsTitle get() = t(
+        "Where are the other actions?",
+        "Где остальные действия?"
+    )
+    val gesturesGuideMoreActionsBody get() = t(
+        "Tap the three dots (⋮) on the task, on the list, or at the top of the board.",
+        "Нажмите на три точки (⋮) у задачи, у списка или вверху у доски."
+    )
+    val gesturesGuideInProgressTitle get() = t(
+        "How do I mark what I’m doing right now?",
+        "Как отметить, чем занимаюсь сейчас?"
+    )
+    val gesturesGuideInProgressBody get() = t(
+        "On the card, tap the lightning icon — that highlights one current task.",
+        "На карточке нажмите значок молнии — так выделяется одно текущее дело."
+    )
+    val gesturesGuideDueDateTitle get() = t(
+        "How do I set a due date?",
+        "Как поставить срок?"
+    )
+    val gesturesGuideDueDateBody get() = t(
+        "Open the task menu (⋮) and pick a day — for example Today or Tomorrow.",
+        "Откройте меню задачи (⋮) и выберите день — например «Сегодня» или «Завтра»."
+    )
+
     val openSystemNotifications get() = t("Notification settings", "Настройки уведомлений")
     val notificationsDeniedBanner get() = t(
         "Reminders are off. Enable notifications to get due-date alerts.",
@@ -200,6 +342,22 @@ class AppStrings(private val appLanguage: AppLanguage) {
     val hub get() = t("Hub", "Хаб")
     val hubLabel get() = t("Hub:", "Хаб:")
     val eisenhowerButtons get() = t("Eisenhower matrix buttons", "Кнопки матрицы Эйзенхауэра")
+    val taskComplexity get() = t("Impact", "Вклад")
+    val taskComplexityHint get() = t(
+        "How much this step moves the goal (1 — small, 5 — major). Not how hard it felt.",
+        "Насколько шаг двигает цель (1 — мелкий, 5 — крупный). Не то, насколько было тяжело делать."
+    )
+    val taskDuration get() = t("Duration", "Длительность")
+    val taskDurationNone get() = t("Not set", "Не задано")
+    fun taskDurationMinutes(m: Int) = t("$m min", "$m мин")
+    val rateQuality get() = t("Rate", "Оценить")
+    val rateQualityTitle get() = t("How well was it done?", "Насколько хорошо сделано?")
+    val rateQualityHint get() = t("1 — barely, 5 — excellent", "1 — едва, 5 — отлично")
+    val rateQualitySkip get() = t("Skip", "Пропустить")
+    fun qualityLabel(q: Int) = t("Quality: $q", "Оценка: $q")
+    val markNotDone get() = t("Not done", "Не выполнено")
+    val clearNotDone get() = t("Clear “not done”", "Снять «не выполнено»")
+    val notDoneBadge get() = t("not done", "не сделано")
     val setDueDate get() = t("Set due date", "Задать срок")
     val taskCategory get() = t("Task category:", "Категория задачи:")
     val noStatusSelected get() = t("No status selected", "Без статуса (не выбран)")
@@ -303,8 +461,11 @@ class AppStrings(private val appLanguage: AppLanguage) {
     val widgetFocus get() = t("Focus", "В работе")
     val widgetDueSection get() = t("Today / overdue", "Сегодня / просрочено")
     val widgetEmpty get() = t("No focus or due tasks", "Нет фокуса и срочных задач")
-    val widgetFocusOnlyTitle get() = t("Kairos Focus", "Kairos Фокус")
-    val widgetFocusOnlyDesc get() = t("Focus task only", "Только задача в работе")
+    val widgetFocusOnlyTitle get() = t("Kairos", "Kairos")
+    val widgetFocusOnlyDesc get() = t(
+        "Focus task, or quick add and voice",
+        "Фокус или быстрая задача и голос"
+    )
     val archiveBoard get() = t("Archive board", "В архив")
     val unarchiveBoard get() = t("Restore board", "Вернуть из архива")
     val showArchivedBoards get() = t("Show archived", "Показать архив")
@@ -313,7 +474,7 @@ class AppStrings(private val appLanguage: AppLanguage) {
     val boardTemplate get() = t("Template", "Шаблон")
     val templateInbox get() = t("Inbox only", "Только Inbox")
     val templateFlow get() = t("Flow", "Поток")
-    val templateEisenhower get() = t("Eisenhower", "Эйзенхауэр")
+    val templateEisenhower get() = t("Priorities", "Приоритеты")
     val exportProject get() = t("Export project", "Экспорт проекта")
     val shareProject get() = t("Share project", "Поделиться проектом")
     val themeSystem get() = t("System", "Система")
@@ -329,6 +490,173 @@ class AppStrings(private val appLanguage: AppLanguage) {
     val eisenhowerPaletteSunset get() = t("Sunset", "Закат")
     val eisenhowerPaletteOcean get() = t("Ocean", "Океан")
     val weekStats get() = t("This week", "На этой неделе")
+    val statsTitle get() = t("Review", "Обзор")
+    val statsRowHint get() = t("Progress and movement", "Прогресс и движение")
+    val statsTabGoals get() = t("Goals", "Цели")
+    val statsTabForecast get() = t("Movement", "Движение")
+    val statsTabPeriod get() = t("Period", "Период")
+    val statsTabArchive get() = t("Archive", "Архив")
+    val statsArchiveDone get() = t("Done", "Готово")
+    val statsArchiveNotDone get() = t("Not done", "Не вып.")
+    val statsArchiveEmpty get() = t("Archive is empty", "Архив пуст")
+    val statsArchiveNotDoneHint get() = t(
+        "−step weight · cannot restore",
+        "−вес шага · на доску не вернуть"
+    )
+    val statsExcludeFromStats get() = t("Ignore in stats", "Не учитывать")
+    val statsIncludeInStats get() = t("Count in stats", "Учитывать")
+    val statsDeleteToJournal get() = t("Delete (keep in journal)", "Удалить (в журнал)")
+    val statsClearArchive get() = t("Clear archive", "Очистить архив")
+    fun statsClearArchiveConfirm(n: Int) = t(
+        "Delete $n archived task(s)? They stay in stats via the journal.",
+        "Удалить $n задач(и) из архива? В статистике они останутся через журнал."
+    )
+    val statsAddGoal get() = t("Add goal", "Добавить цель")
+    val statsRemoveGoal get() = t("Remove from goals", "Убрать из целей")
+    val markAsGoal get() = t("Mark as goal", "Пометить как цель")
+    val unmarkAsGoal get() = t("Unmark goal", "Снять пометку цели")
+    val statsGoalArchivedBadge get() = t("archived", "архив")
+    val statsMore get() = t("More", "Ещё")
+    val statsGuideMenu get() = t("What the numbers mean", "Что означают цифры")
+    val statsGuideTitle get() = t("Review guide", "Гайд по Обзору")
+    val statsGuideGoalProgressTitle get() = t("Goal progress", "Прогресс цели")
+    val statsGuideGoalProgressBody get() = t(
+        "On Total: how far the selected goal has come overall.\nOn Day / Week / …: how much progress changed in that window (+N% for the day, week, …).",
+        "На «Всего»: насколько продвинулась выбранная цель целиком.\nНа День / Неделя / …: насколько прогресс изменился в этом окне (+N% за день, неделю, …)."
+    )
+    val statsGuideRhythmTitle get() = t("Rhythm", "Ритм")
+    val statsGuideRhythmBody get() = t(
+        "How well you keep recurring habits in this period.",
+        "Насколько выдерживаете регулярные привычки в этом периоде."
+    )
+    val statsGuideTriviaTitle get() = t("Off goal", "Мимо цели")
+    val statsGuideTriviaBody get() = t(
+        "Done work that is not tied to the selected goal.",
+        "Сделанное, что не связано с выбранной целью."
+    )
+    val statsGuideAssessmentTitle get() = t("Movement toward goal", "Движение к цели")
+    val statsGuideAssessmentBody get() = t(
+        "How healthy your move toward the selected goal looks right now — not only how much is done. Progress is “how much of the goal is closed”. Movement toward goal is “how well that movement looks”. Shown on Total.",
+        "Насколько здорово выглядит ход к выбранной цели сейчас — не только сколько уже сделано. Прогресс — «сколько цели закрыто». Движение к цели — «насколько хорошо выглядит это движение». Показывается на «Всего»."
+    )
+    val statsGuideChanceTitle get() = t("Likelihood of completion", "Вероятность выполнения")
+    val statsGuideChanceBody get() = t(
+        "A rough heuristic, not a real probability — a compass for whether you are on track to finish the goal. Shown on Total.",
+        "Грубая эвристика, не настоящая вероятность — компас, насколько вы на пути довести цель. Показывается на «Всего»."
+    )
+    val statsGuidePeriodAssessmentTitle get() = t("Period tab", "Вкладка «Период»")
+    val statsGuidePeriodAssessmentBody get() = t(
+        "Whole project work, not one goal.\nTotal: overall movement with a progress bar.\nDay / Week / …: how that movement scored in the window (+N% for the day, week, …).",
+        "Вся работа проекта, не одна цель.\n«Всего»: общее движение с полоской прогресса.\nДень / Неделя / …: насколько хорошо прошло окно (+N% за день, неделю, …)."
+    )
+    val statsGuideGoalsTitle get() = t("Goals", "Цели")
+    val statsGuideGoalsBody get() = t(
+        "Only tasks you mark as a goal (More on the card). You can switch between several. Archived goals stay in the list. Numbers always refer to the selected goal.\nOn Goals and Period: Total is the absolute picture from the stats start date; Day / Week / … show change in that window. Archive has no period chips.",
+        "Только задачи с пометкой «цель» (Ещё на карточке). Можно переключаться между несколькими. Архивные остаются в списке. Цифры всегда про выбранную цель.\nНа «Целях» и «Периоде»: «Всего» — картина с даты начала учёта; День / Неделя / … — изменение за окно. В «Архиве» чипов периодов нет."
+    )
+    val statsEpochResetYear get() = t("Reset to Jan 1", "Сбросить на 1 января")
+    val statsEpochTitle get() = t("Stats start date", "Начало учёта статистики")
+    val statsEpochHint get() = t(
+        "“Total” and soft reset use this date. Default: Jan 1 of this year.",
+        "«Всего» и мягкий сброс считают от этой даты. По умолчанию: 1 января текущего года."
+    )
+    val statsResetPeriod get() = t("Reset this period", "Сбросить этот период")
+    val statsResetPeriodHint get() = t(
+        "Move the start date to now so this period no longer counts.",
+        "Сдвинуть начало учёта на сейчас — период перестанет учитываться."
+    )
+    val statsGoalLabel get() = t("Goal", "Цель")
+    val statsGoalProgress get() = t("Goal progress", "Прогресс цели")
+    val statsNoGoals get() = t(
+        "Add a goal or link tasks as goals and steps",
+        "Добавьте цель или свяжите задачи как цели и шаги"
+    )
+    fun statsPeriodDelta(pp: Int, period: com.example.kaizenkanban.domain.stats.StatsPeriod): String {
+        val sign = if (pp >= 0) "+" else ""
+        val window = when (period) {
+            com.example.kaizenkanban.domain.stats.StatsPeriod.DAY -> t("day", "день")
+            com.example.kaizenkanban.domain.stats.StatsPeriod.WEEK -> t("week", "неделю")
+            com.example.kaizenkanban.domain.stats.StatsPeriod.MONTH -> t("month", "месяц")
+            com.example.kaizenkanban.domain.stats.StatsPeriod.MONTHS_3 -> t("3 months", "3 месяца")
+            com.example.kaizenkanban.domain.stats.StatsPeriod.MONTHS_6 -> t("half a year", "полгода")
+            com.example.kaizenkanban.domain.stats.StatsPeriod.YEAR -> t("year", "год")
+            com.example.kaizenkanban.domain.stats.StatsPeriod.NOW -> t("total", "всего")
+        }
+        return t("$sign$pp% this $window", "$sign$pp% за $window")
+    }
+    fun statsGoalChildren(count: Int, weight: Int) =
+        t("$count steps · weight $weight", "$count шагов · вес $weight")
+    val statsForecastTitle get() = t("Movement toward goal", "Движение к цели")
+    fun statsForecastBreakdown(p: Int, r: Int, o: Int) = t(
+        "progress $p% · rhythm $r% · off goal $o%",
+        "прогресс $p% · ритм $r% · мимо цели $o%"
+    )
+    val statsPeriodOverallTitle get() = t("Overall movement", "Общее движение")
+    val statsPeriodTowardShare get() = t("Toward goals share", "Доля к целям")
+    val statsPeriodOverallHint get() = t(
+        "All work in the period, not one goal",
+        "Вся работа за период, не одна цель"
+    )
+    val statsPeriodSummary get() = t("Period summary", "Сводка за период")
+    val statsChartToward get() = t("Toward goals", "К целям")
+    val statsChartTrivia get() = t("Off goal", "Мимо цели")
+    val statsChartProgress get() = t("Over time", "Во времени")
+    val statsChartActivity get() = t("By day", "По дням")
+    val statsChartActivityHint get() = t("Bar height = completions", "Высота = закрытия")
+    val statsChartProgressHint get() = t(
+        "Solid = progress · dashed = movement toward goal",
+        "Сплошная = прогресс · пунктир = движение к цели"
+    )
+    val statsChartProgressLegend get() = t("Progress", "Прогресс")
+    val statsChartForecastLegend get() = t("Movement toward goal", "Движение к цели")
+    val statsChanceTitle get() = t("Likelihood of completion", "Вероятность выполнения")
+    fun statsForecastRhythmBonus(pp: Int) = t("Rhythm +$pp%", "Ритм +$pp%")
+    fun statsForecastTriviaPenalty(pp: Int) = t("Off goal −$pp%", "Мимо цели −$pp%")
+    val statsChartAxisCount get() = t("count", "шт.")
+    val importanceLabel get() = t("Importance", "Важность")
+    val statsEditTask get() = t("Edit details", "Параметры")
+    val statsTaskSettings get() = t("Task settings", "Настройки задачи")
+    val taskCriteriaTitle get() = t("Task criteria", "Критерии задачи")
+    fun statsDoneTotal(n: Int) = t("Done: $n", "Выполнено: $n")
+    fun statsTowardGoals(n: Int, w: Int) = t("Toward goals: $n (weight $w)", "К целям: $n (вес $w)")
+    fun statsTrivia(n: Int, w: Int) = t("Off goal: $n (weight $w)", "Мимо цели: $n (вес $w)")
+    fun statsRecurring(fact: Int, plan: Int) = t("Recurring: $fact / $plan", "Регулярные: $fact / $plan")
+    fun statsRated(rated: Int, total: Int) = t("Rated: $rated / $total", "Оценено: $rated / $total")
+    fun statsPeriodLabel(period: com.example.kaizenkanban.domain.stats.StatsPeriod): String =
+        when (period) {
+            com.example.kaizenkanban.domain.stats.StatsPeriod.NOW -> t("Total", "Всего")
+            com.example.kaizenkanban.domain.stats.StatsPeriod.DAY -> t("Day", "День")
+            com.example.kaizenkanban.domain.stats.StatsPeriod.WEEK -> t("Week", "Неделя")
+            com.example.kaizenkanban.domain.stats.StatsPeriod.MONTH -> t("Month", "Месяц")
+            com.example.kaizenkanban.domain.stats.StatsPeriod.MONTHS_3 -> t("3 months", "3 месяца")
+            com.example.kaizenkanban.domain.stats.StatsPeriod.MONTHS_6 -> t("6 months", "Полгода")
+            com.example.kaizenkanban.domain.stats.StatsPeriod.YEAR -> t("Year", "Год")
+        }
+    fun statsHowPeriodWent(period: com.example.kaizenkanban.domain.stats.StatsPeriod): String =
+        when (period) {
+            com.example.kaizenkanban.domain.stats.StatsPeriod.DAY ->
+                t("How did the day go", "Как прошёл день")
+            com.example.kaizenkanban.domain.stats.StatsPeriod.WEEK ->
+                t("How did the week go", "Как прошла неделя")
+            com.example.kaizenkanban.domain.stats.StatsPeriod.MONTH ->
+                t("How did the month go", "Как прошёл месяц")
+            com.example.kaizenkanban.domain.stats.StatsPeriod.MONTHS_3 ->
+                t("How did 3 months go", "Как прошли 3 месяца")
+            com.example.kaizenkanban.domain.stats.StatsPeriod.MONTHS_6 ->
+                t("How did half a year go", "Как прошло полгода")
+            com.example.kaizenkanban.domain.stats.StatsPeriod.YEAR ->
+                t("How did the year go", "Как прошёл год")
+            com.example.kaizenkanban.domain.stats.StatsPeriod.NOW ->
+                t("Total", "Всего")
+        }
+    val statsFromStartSection get() = t("Overall picture", "Общая картина")
+    val statsPeriodChangesSection get() = t("Changes in this period", "Изменения за период")
+    val statsResetGoalEpoch get() = t("Restart goal tracking", "Начать учёт цели заново")
+    val statsResetGoalEpochHint get() = t(
+        "Older completed steps stop counting for this goal. History stays in Archive.",
+        "Старые закрытые шаги перестанут считаться для этой цели. История останется в Архиве."
+    )
+    val statsProgressDelta get() = t("Progress change", "Изменение прогресса")
     fun weekCompleted(count: Int) = t(
         "$count done",
         "$count готово"
@@ -370,6 +698,7 @@ class AppStrings(private val appLanguage: AppLanguage) {
         "Молния — задача в работе. На домашний экран можно вынести виджеты."
     )
     val widgetQuickAdd get() = t("Quick add", "Быстрая задача")
+    val widgetVoice get() = t("Dictate task", "Надиктовать задачу")
     val quickAddTask get() = t("Quick add", "Быстрая задача")
     val quickAddHint get() = t("Adds to the primary board inbox", "В Inbox основной доски")
     fun quickAddGoesTo(board: String, hub: String) = t(
@@ -393,7 +722,10 @@ class AppStrings(private val appLanguage: AppLanguage) {
     val cannotOpenLink get() = t("Could not open the link", "Не удалось открыть ссылку")
     val invalidImportLink get() = t("Invalid import link", "Неверная ссылка импорта")
     val exportSuccess get() = t("Tasks exported successfully!", "Задачи успешно экспортированы!")
+    val clearAll get() = t("Clear all", "Очистить все")
     val clearCompletedTitle get() = t("Clear completed?", "Очистить выполненные?")
+    val clearNotDoneTitle get() = t("Clear not done?", "Очистить невыполненные?")
+    val recurringDelete get() = t("Delete template", "Удалить шаблон")
     val removedFromMatrix get() = t("Removed from the Eisenhower matrix", "Удалено из матрицы Эйзенхауэра")
 
     fun saveError(details: String?) = t("Save error: $details", "Ошибка сохранения: $details")
@@ -421,14 +753,75 @@ class AppStrings(private val appLanguage: AppLanguage) {
     )
     fun movedToHub(name: String) = t("Moved to ${quoted(name)}", "Перемещено в ${quoted(name)}")
     fun completedCount(count: Int) = t("Done ($count)", "Выполнено ($count)")
+    fun notDoneCount(count: Int) = t("Not done ($count)", "Не выполнено ($count)")
+    val taskLinksTitle get() = t("Task links", "Связи задачи")
+    val taskParents get() = t("Goals (parents)", "Цели (родители)")
+    val taskChildren get() = t("Steps (children)", "Шаги (дети)")
+    val taskLinksEmptyParents get() = t("No parent goals yet", "Пока нет родительских целей")
+    val taskLinksEmptyChildren get() = t("No steps yet", "Пока нет шагов")
+    val pickParentTask get() = t("Pick a parent goal", "Выберите родительскую цель")
+    val pickChildTask get() = t("Pick a step", "Выберите шаг")
+    val noTasksToLink get() = t("No suitable tasks", "Нет подходящих задач")
+    val taskLinkCycleRejected get() = t("That link would create a cycle", "Такая связь создаст цикл")
+    fun parentChip(title: String) = t("↑ $title", "↑ $title")
+    fun childrenChip(count: Int) = t("↓ $count", "↓ $count")
+    fun childrenChipLabel(title: String) = t("↓ $title", "↓ $title")
+    val manageTaskLinks get() = t("Links", "Связи")
+    val addParentLink get() = t("Add parent goal", "Добавить цель")
+    val addChildLink get() = t("Add step", "Добавить шаг")
+    val unknownHub get() = t("Other hub", "Другой хаб")
+    val linkFocusMode get() = t("Link focus", "Режим связей")
+    val linkFocusExit get() = t("Show all", "Показать все")
+    val linkFocusEmptyHub get() = t("No linked tasks in this hub", "В этом хабе нет связанных задач")
     fun moreTasksCount(count: Int) = t("+$count more", "ещё $count")
     fun clearCompletedText(count: Int, hub: String) = t(
-        "Delete these $count completed tasks from hub ${quoted(hub)}? They will be removed from every board.",
-        "Удалить эти выполненные задачи ($count) из хаба ${quoted(hub)}? Они пропадут со всех досок."
+        "Move these $count completed tasks from hub ${quoted(hub)} to Archive? They leave the board but stay in Review.",
+        "Перенести эти выполненные задачи ($count) из хаба ${quoted(hub)} в Архив? С доски исчезнут, в Обзоре останутся."
+    )
+    fun clearNotDoneText(count: Int, hub: String) = t(
+        "Move these $count not-done tasks from hub ${quoted(hub)} to Archive? They cannot be restored to the board.",
+        "Перенести эти невыполненные задачи ($count) из хаба ${quoted(hub)} в Архив? На доску вернуть нельзя."
     )
     fun closedAt(time: String) = t("Closed: $time", "Закрыто: $time")
     fun hubWithName(name: String) = t("Hub: ${quoted(name)}", "Хаб: ${quoted(name)}")
     fun toHub(name: String) = t("To $name", "В $name")
+
+    // Voice assistant (PRO)
+    val voiceAssistant get() = t("Dictate task", "Надиктовать задачу")
+    val voiceListening get() = t("Listening…", "Слушаю…")
+    val voiceListeningHint get() = t(
+        "Say the task title",
+        "Назовите название задачи"
+    )
+    val voiceListeningChannel get() = t("Voice capture", "Голосовой ввод")
+    val voiceNotUnderstood get() = t(
+        "Say the task title, e.g. buy milk",
+        "Назовите задачу, например: купить молоко"
+    )
+    fun voiceAdded(title: String) = t("Added: ${quoted(title)}", "Добавлено: ${quoted(title)}")
+    val voiceNoDestination get() = t("No board/hub for new tasks", "Нет доски/хаба для задачи")
+    val voiceNoMatch get() = t("Didn't catch that — try again", "Не расслышала — повторите")
+    val voiceNetworkError get() = t("Internet needed for voice", "Нужен интернет для голоса")
+    val voiceUnavailable get() = t("Speech recognition unavailable", "Распознавание речи недоступно")
+    val voiceError get() = t("Couldn’t add the task", "Не удалось добавить задачу")
+    val proFeatureLocked get() = t(
+        "Kairos PRO required — enable the PRO stub in Settings",
+        "Нужен Kairos PRO — включите заглушку PRO в Настройках"
+    )
+    val proSection get() = t("Kairos PRO", "Kairos PRO")
+    val proUnlockedStub get() = t("PRO unlocked (stub)", "PRO включён (заглушка)")
+    val proUnlockedStubHint get() = t(
+        "Temporary switch until Play Billing. Voice dictate uses this flag.",
+        "Временный переключатель до Play Billing. Голосовой ввод смотрит на него."
+    )
+    val voiceHintExamples get() = t(
+        "Tap the mic and say the task title, e.g. «buy milk»",
+        "Нажмите микрофон и назовите задачу, например: «купить молоко»"
+    )
+    val voiceMicPermissionNeeded get() = t(
+        "Microphone permission is required to dictate tasks",
+        "Для надиктовки задач нужно разрешение на микрофон"
+    )
 
     private companion object {
         val NAME_MAP = mapOf(
@@ -442,11 +835,18 @@ class AppStrings(private val appLanguage: AppLanguage) {
                 "Спринты" to "Sprints",
                 "Метрики" to "Metrics",
                 "Главная цель" to "Main Goal",
+                "На стороне контрагента" to "Waiting on others",
+                "Сделать" to "Do",
+                "Планирую" to "Planning",
+                "Держу курс" to "Holding course",
+                "Лестница целей" to "Goal ladder",
+                "OKR" to "Goal ladder",
                 "Срочно и важно" to "Urgent and important",
                 "Важно, не срочно" to "Important, not urgent",
                 "Срочно, не важно" to "Urgent, not important",
                 "Не срочно и не важно" to "Not urgent and not important",
-                "Матрица Эйзенхауэра" to "Eisenhower Matrix",
+                "Матрица Эйзенхауэра" to "Priorities",
+                "Приоритеты" to "Priorities",
                 "Размышление" to "Reflection",
                 "Изучение" to "Learning",
                 "Контроль" to "Control",
@@ -467,11 +867,18 @@ class AppStrings(private val appLanguage: AppLanguage) {
                 "Sprints" to "Спринты",
                 "Metrics" to "Метрики",
                 "Main Goal" to "Главная цель",
+                "Waiting on others" to "На стороне контрагента",
+                "Do" to "Сделать",
+                "Planning" to "Планирую",
+                "Holding course" to "Держу курс",
+                "Goal ladder" to "Лестница целей",
+                "OKR" to "Лестница целей",
                 "Urgent and important" to "Срочно и важно",
                 "Important, not urgent" to "Важно, не срочно",
                 "Urgent, not important" to "Срочно, не важно",
                 "Not urgent and not important" to "Не срочно и не важно",
-                "Eisenhower Matrix" to "Матрица Эйзенхауэра",
+                "Eisenhower Matrix" to "Приоритеты",
+                "Priorities" to "Приоритеты",
                 "Reflection" to "Размышление",
                 "Learning" to "Изучение",
                 "Control" to "Контроль",

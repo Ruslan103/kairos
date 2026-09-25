@@ -82,6 +82,15 @@ object KairosTransferHelper {
             obj.put("isHidden", t.isHidden)
             if (t.repeatRule != null) obj.put("repeatRule", t.repeatRule)
             if (t.reminderMinutesOfDay != null) obj.put("reminderMinutesOfDay", t.reminderMinutesOfDay)
+            if (t.recurringTemplateId != null) obj.put("recurringTemplateId", t.recurringTemplateId)
+            if (t.complexity != null) obj.put("complexity", t.complexity)
+            if (t.estimatedMinutes != null) obj.put("estimatedMinutes", t.estimatedMinutes)
+            if (t.completionQuality != null) obj.put("completionQuality", t.completionQuality)
+            obj.put("workflowStatus", t.workflowStatus)
+            obj.put("isBoardArchived", t.isBoardArchived)
+            obj.put("statsExcluded", t.statsExcluded)
+            obj.put("isGoal", t.isGoal)
+            if (t.goalStatsEpochMillis != null) obj.put("goalStatsEpochMillis", t.goalStatsEpochMillis)
             if (t.linkedColumnIds.isNotEmpty()) {
                 val linkedArr = JSONArray()
                 t.linkedColumnIds.forEach { linkedArr.put(it) }
@@ -126,6 +135,16 @@ object KairosTransferHelper {
             contactsArr.put(obj)
         }
         root.put("contacts", contactsArr)
+
+        val linksArr = JSONArray()
+        data.taskLinks.forEach { link ->
+            val obj = JSONObject()
+            obj.put("parentId", link.parentId)
+            obj.put("childId", link.childId)
+            obj.put("createdAt", link.createdAt)
+            linksArr.put(obj)
+        }
+        root.put("taskLinks", linksArr)
 
         return root.toString(2)
     }
@@ -214,6 +233,25 @@ object KairosTransferHelper {
                     reminderMinutesOfDay = if (obj.has("reminderMinutesOfDay") && !obj.isNull("reminderMinutesOfDay")) {
                         obj.getInt("reminderMinutesOfDay")
                     } else null,
+                    recurringTemplateId = if (obj.has("recurringTemplateId") && !obj.isNull("recurringTemplateId")) {
+                        obj.getString("recurringTemplateId")
+                    } else null,
+                    complexity = if (obj.has("complexity") && !obj.isNull("complexity")) obj.getInt("complexity") else null,
+                    estimatedMinutes = if (obj.has("estimatedMinutes") && !obj.isNull("estimatedMinutes")) {
+                        obj.getInt("estimatedMinutes")
+                    } else null,
+                    completionQuality = if (obj.has("completionQuality") && !obj.isNull("completionQuality")) {
+                        obj.getInt("completionQuality")
+                    } else null,
+                    workflowStatus = obj.optString("workflowStatus", "").ifBlank {
+                        if (obj.optBoolean("isCompleted", false)) "done" else "open"
+                    },
+                    isBoardArchived = obj.optBoolean("isBoardArchived", false),
+                    statsExcluded = obj.optBoolean("statsExcluded", false),
+                    isGoal = obj.optBoolean("isGoal", false),
+                    goalStatsEpochMillis = if (obj.has("goalStatsEpochMillis") && !obj.isNull("goalStatsEpochMillis")) {
+                        obj.getLong("goalStatsEpochMillis")
+                    } else null,
                     linkedColumnIds = buildList {
                         val linkedArr = obj.optJSONArray("linkedColumnIds")
                         if (linkedArr != null) {
@@ -277,6 +315,19 @@ object KairosTransferHelper {
             )
         }
 
+        val taskLinks = mutableListOf<TaskLink>()
+        val linksArr = root.optJSONArray("taskLinks") ?: JSONArray()
+        for (i in 0 until linksArr.length()) {
+            val obj = linksArr.getJSONObject(i)
+            taskLinks.add(
+                TaskLink(
+                    parentId = obj.getString("parentId"),
+                    childId = obj.getString("childId"),
+                    createdAt = obj.optLong("createdAt", 0L)
+                )
+            )
+        }
+
         return KairosTransferData(
             version = version,
             exportedAt = exportedAt,
@@ -288,7 +339,8 @@ object KairosTransferHelper {
             tasks = tasks,
             comments = comments,
             columnComments = columnComments,
-            contacts = contacts
+            contacts = contacts,
+            taskLinks = taskLinks
         )
     }
 

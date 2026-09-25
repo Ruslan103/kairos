@@ -60,6 +60,7 @@ import com.example.kaizenkanban.data.local.KairosPreferences
 import com.example.kaizenkanban.reminders.DueReminderScheduler
 import com.example.kaizenkanban.ui.i18n.LanguageToggle
 import com.example.kaizenkanban.ui.i18n.LocalAppStrings
+import com.example.kaizenkanban.ui.onboarding.GesturesGuideDialog
 import com.example.kaizenkanban.ui.onboarding.OnboardingDialog
 import com.example.kaizenkanban.ui.onboarding.PlanningGuideDialog
 import com.example.kaizenkanban.ui.resolveQuickAddTarget
@@ -83,6 +84,7 @@ fun SettingsScreen(
     var showArchived by remember { mutableStateOf(prefs.showArchivedBoards) }
     var showOnboarding by remember { mutableStateOf(false) }
     var showPlanningGuide by remember { mutableStateOf(false) }
+    var showGesturesGuide by remember { mutableStateOf(false) }
     var notificationsGranted by remember {
         mutableStateOf(
             Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
@@ -146,6 +148,11 @@ fun SettingsScreen(
             onDismiss = { showPlanningGuide = false }
         )
     }
+    if (showGesturesGuide) {
+        GesturesGuideDialog(
+            onDismiss = { showGesturesGuide = false }
+        )
+    }
 
     Scaffold(
         topBar = {
@@ -180,6 +187,38 @@ fun SettingsScreen(
                 .padding(horizontal = 20.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
+            SettingsSection(title = s.statsEpochTitle) {
+                var epochTick by remember { mutableStateOf(0) }
+                val epoch = remember(epochTick) { prefs.statsEpochMillis }
+                val fmt = remember {
+                    java.text.SimpleDateFormat("d MMM yyyy", java.util.Locale.getDefault())
+                }
+                Text(
+                    text = fmt.format(java.util.Date(epoch)),
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = s.statsEpochHint,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = {
+                        prefs.resetStatsEpochToDefault()
+                        epochTick++
+                    }) { Text(s.statsEpochResetYear) }
+                    TextButton(onClick = {
+                        prefs.advanceStatsEpochTo(System.currentTimeMillis())
+                        epochTick++
+                    }) { Text(s.statsResetPeriod) }
+                }
+            }
+
+            HorizontalDivider()
+
             SettingsSection(title = s.appearance) {
                 Text(
                     text = s.themeLabel,
@@ -340,11 +379,49 @@ fun SettingsScreen(
 
             HorizontalDivider()
 
+            SettingsSection(title = s.proSection) {
+                var proUnlocked by remember { mutableStateOf(prefs.proUnlocked) }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                        Text(s.proUnlockedStub, style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            s.proUnlockedStubHint,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            s.voiceHintExamples,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = proUnlocked,
+                        onCheckedChange = {
+                            proUnlocked = it
+                            prefs.proUnlocked = it
+                        }
+                    )
+                }
+            }
+
+            HorizontalDivider()
+
             SettingsSection(title = s.helpSection) {
                 TextButton(
                     onClick = { showPlanningGuide = true }
                 ) {
                     Text(s.planningGuideOpen)
+                }
+                TextButton(
+                    onClick = { showGesturesGuide = true }
+                ) {
+                    Text(s.gesturesGuideOpen)
                 }
                 TextButton(
                     onClick = {

@@ -152,4 +152,49 @@ interface KanbanDao {
 
     @Query("DELETE FROM contacts WHERE projectId = :projectId")
     suspend fun deleteContactsByProject(projectId: String)
+
+    // Recurring templates
+    @Query("SELECT * FROM recurring_templates ORDER BY createdAt ASC")
+    fun getAllRecurringTemplates(): Flow<List<RecurringTemplateEntity>>
+
+    @Query("SELECT * FROM recurring_templates WHERE projectId = :projectId ORDER BY createdAt ASC")
+    fun getRecurringTemplatesByProject(projectId: String): Flow<List<RecurringTemplateEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertRecurringTemplate(template: RecurringTemplateEntity)
+
+    @Update
+    suspend fun updateRecurringTemplate(template: RecurringTemplateEntity)
+
+    @Query("DELETE FROM recurring_templates WHERE id = :templateId")
+    suspend fun deleteRecurringTemplate(templateId: String)
+
+    @Query("DELETE FROM recurring_templates WHERE projectId = :projectId")
+    suspend fun deleteRecurringTemplatesByProject(projectId: String)
+
+    // Task links (DAG)
+    @Query("SELECT * FROM task_links ORDER BY createdAt ASC")
+    fun getAllTaskLinks(): Flow<List<TaskLinkEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertTaskLink(link: TaskLinkEntity)
+
+    @Query("DELETE FROM task_links WHERE parentId = :parentId AND childId = :childId")
+    suspend fun deleteTaskLink(parentId: String, childId: String)
+
+    @Query("DELETE FROM task_links WHERE parentId = :taskId OR childId = :taskId")
+    suspend fun deleteTaskLinksForTask(taskId: String)
+
+    // Stats journal (survives hard-delete from Archive)
+    @Query("SELECT * FROM stats_journal ORDER BY eventAt DESC")
+    fun getAllStatsJournal(): Flow<List<StatsJournalEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertStatsJournal(entry: StatsJournalEntity)
+
+    @Query("DELETE FROM stats_journal WHERE id = :id")
+    suspend fun deleteStatsJournal(id: String)
+
+    @Query("DELETE FROM stats_journal WHERE projectId = :projectId")
+    suspend fun deleteStatsJournalByProject(projectId: String)
 }

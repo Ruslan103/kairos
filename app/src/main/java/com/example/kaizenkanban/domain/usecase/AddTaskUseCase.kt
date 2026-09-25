@@ -1,6 +1,7 @@
 package com.example.kaizenkanban.domain.usecase
 
 import com.example.kaizenkanban.domain.model.Task
+import com.example.kaizenkanban.domain.model.TaskWorkflow
 import com.example.kaizenkanban.domain.repository.KanbanRepository
 import java.util.UUID
 
@@ -13,11 +14,13 @@ class AddTaskUseCase(private val repository: KanbanRepository) {
         currentTasksInColumn: List<Task>,
         eisenhowerQuadrant: String? = null,
         showEisenhowerButtons: Boolean = true,
-        repeatRule: String? = null,
-        reminderMinutesOfDay: Int? = null
-    ) {
-        if (title.isBlank()) return
-        
+        reminderMinutesOfDay: Int? = null,
+        recurringTemplateId: String? = null,
+        complexity: Int? = null,
+        estimatedMinutes: Int? = null
+    ): String? {
+        if (title.isBlank()) return null
+
         val nextPosition = currentTasksInColumn.maxOfOrNull { it.position }?.plus(1) ?: 0
         val task = Task(
             id = UUID.randomUUID().toString(),
@@ -30,9 +33,14 @@ class AddTaskUseCase(private val repository: KanbanRepository) {
             createdAt = System.currentTimeMillis(),
             eisenhowerQuadrant = eisenhowerQuadrant,
             showEisenhowerButtons = showEisenhowerButtons,
-            repeatRule = repeatRule,
-            reminderMinutesOfDay = if (dueDate != null) reminderMinutesOfDay else null
+            repeatRule = null,
+            reminderMinutesOfDay = if (dueDate != null) reminderMinutesOfDay else null,
+            recurringTemplateId = recurringTemplateId,
+            complexity = complexity?.coerceIn(1, 5),
+            estimatedMinutes = estimatedMinutes?.takeIf { it > 0 },
+            workflowStatus = TaskWorkflow.OPEN
         )
         repository.insertTask(task)
+        return task.id
     }
 }
