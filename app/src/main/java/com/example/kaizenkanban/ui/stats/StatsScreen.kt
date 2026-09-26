@@ -83,7 +83,9 @@ import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
 import com.example.kaizenkanban.data.local.KairosPreferences
 import com.example.kaizenkanban.domain.model.Column as HubColumn
+import com.example.kaizenkanban.domain.model.RecurringTemplate
 import com.example.kaizenkanban.domain.model.Task
+import com.example.kaizenkanban.domain.model.TaskLink
 import com.example.kaizenkanban.domain.stats.DailyActivityPoint
 import com.example.kaizenkanban.domain.stats.ProgressPoint
 import com.example.kaizenkanban.domain.stats.ProjectStatsCalculator
@@ -93,6 +95,7 @@ import com.example.kaizenkanban.ui.calendar.localMillisToUtcPicker
 import com.example.kaizenkanban.ui.calendar.startOfLocalDayMillis
 import com.example.kaizenkanban.ui.calendar.utcPickerMillisToLocalNoon
 import com.example.kaizenkanban.ui.components.DialogSectionDivider
+import com.example.kaizenkanban.ui.components.MarqueeDropdownField
 import com.example.kaizenkanban.ui.i18n.LocalAppStrings
 import com.example.kaizenkanban.ui.taskmeta.TaskCriteriaDialog
 import com.example.kaizenkanban.ui.theme.chartForecast
@@ -124,7 +127,12 @@ fun StatsScreen(
     val project = state.projects.find { it.id == projectId }
     var period by rememberSaveable { mutableStateOf(StatsPeriod.NOW.name) }
     val selectedPeriod = remember(period) {
-        runCatching { StatsPeriod.valueOf(period) }.getOrDefault(StatsPeriod.WEEK)
+        runCatching {
+            when (period) {
+                "DAY" -> StatsPeriod.TODAY
+                else -> StatsPeriod.valueOf(period)
+            }
+        }.getOrDefault(StatsPeriod.WEEK)
     }
     var selectedGoalId by rememberSaveable { mutableStateOf<String?>(null) }
     var tab by rememberSaveable { mutableIntStateOf(0) }
@@ -428,6 +436,8 @@ private fun StatsGuideDialog(onDismiss: () -> Unit) {
                 DialogSectionDivider()
                 GuideSection(s.statsGuideChanceTitle, s.statsGuideChanceBody)
                 DialogSectionDivider()
+                GuideSection(s.statsGuidePlanBreadthTitle, s.statsGuidePlanBreadthBody)
+                DialogSectionDivider()
                 GuideSection(s.statsGuidePeriodAssessmentTitle, s.statsGuidePeriodAssessmentBody)
             }
         },
@@ -527,18 +537,13 @@ private fun GoalsTab(
                 onExpandedChange = { goalMenuExpanded = it },
                 modifier = Modifier.fillMaxWidth()
             ) {
-                OutlinedTextField(
+                MarqueeDropdownField(
                     value = selectedLabel,
-                    onValueChange = {},
-                    readOnly = true,
-                    label = { Text(s.statsGoalLabel) },
-                    trailingIcon = {
-                        ExposedDropdownMenuDefaults.TrailingIcon(expanded = goalMenuExpanded)
-                    },
+                    label = s.statsGoalLabel,
+                    expanded = goalMenuExpanded,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .menuAnchor(),
-                    singleLine = true
+                        .menuAnchor()
                 )
                 ExposedDropdownMenu(
                     expanded = goalMenuExpanded,
@@ -627,6 +632,22 @@ private fun GoalsTab(
                     fontWeight = FontWeight.Bold,
                     color = deltaColor
                 )
+                snapshot.chancePeriodDelta?.let { chanceDelta ->
+                    val chancePct = ProjectStatsCalculator.percent(chanceDelta)
+                    val chanceColor = when {
+                        chancePct > 0 -> MaterialTheme.colorScheme.primary
+                        chancePct < 0 -> MaterialTheme.colorScheme.error
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    Text(s.statsChanceDelta, style = MaterialTheme.typography.labelLarge)
+                    Text(
+                        text = s.statsPeriodDelta(chancePct, snapshot.period),
+                        style = MaterialTheme.typography.displaySmall,
+                        fontWeight = FontWeight.Bold,
+                        color = chanceColor
+                    )
+                }
                 Spacer(Modifier.height(8.dp))
                 Text(s.statsRecurring(snapshot.recurringFact, snapshot.recurringPlan))
                 Text(s.statsTowardGoals(snapshot.towardGoalsCount, snapshot.towardGoalsWeight))
@@ -671,6 +692,17 @@ private fun GoalsTab(
                     s.statsForecastTriviaPenalty(ProjectStatsCalculator.percent(snapshot.triviaPenalty)),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.error
+                )
+            }
+            snapshot.planBreadth?.let { breadth ->
+                Text(
+                    text = s.statsPlanBreadthLine(
+                        breadth = breadth,
+                        branches = snapshot.planBranchCount,
+                        touched = snapshot.planTouchedBranchCount
+                    ),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
@@ -1158,7 +1190,7 @@ private fun ArchiveTaskRow(
                         )
                     }
                     DropdownMenuItem(
-                        text = { Text(s.manageTaskLinks) },
+                        text = { Text(if (task.isGoal) s.goalSteps else s.linkToGoal) },
                         onClick = {
                             menuOpen = false
                             onOpenLinks()

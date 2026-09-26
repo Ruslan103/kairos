@@ -45,7 +45,8 @@ fun TaskEntity.toDomain() = Task(
     isBoardArchived = isBoardArchived,
     statsExcluded = statsExcluded,
     isGoal = isGoal,
-    goalStatsEpochMillis = goalStatsEpochMillis
+    goalStatsEpochMillis = goalStatsEpochMillis,
+    hubGroupId = hubGroupId
 )
 
 fun Task.toEntity() = TaskEntity(
@@ -73,7 +74,8 @@ fun Task.toEntity() = TaskEntity(
     isBoardArchived = isBoardArchived,
     statsExcluded = statsExcluded,
     isGoal = isGoal,
-    goalStatsEpochMillis = goalStatsEpochMillis
+    goalStatsEpochMillis = goalStatsEpochMillis,
+    hubGroupId = hubGroupId
 )
 
 fun StatsJournalEntity.toDomain() = StatsJournalEntry(
@@ -169,6 +171,7 @@ fun RecurringTemplateEntity.toDomain(): RecurringTemplate {
         linkParentIds = linkParentIds.toIdList(),
         linkChildIds = linkChildIds.toIdList(),
         complexity = complexity?.coerceIn(1, 5),
+        skippedOccurrenceKeys = skippedOccurrenceKeys.toIdList(),
         createdAt = createdAt
     )
 }
@@ -197,6 +200,7 @@ fun RecurringTemplate.toEntity() = RecurringTemplateEntity(
     linkParentIds = linkParentIds.toIdStorage(),
     linkChildIds = linkChildIds.toIdStorage(),
     complexity = complexity?.coerceIn(1, 5),
+    skippedOccurrenceKeys = skippedOccurrenceKeys.toIdStorage(),
     createdAt = createdAt
 )
 
@@ -227,3 +231,21 @@ fun Contact.toEntity() = ContactEntity(id, projectId, name, phone, email, role, 
 
 fun TaskLinkEntity.toDomain() = TaskLink(parentId, childId, createdAt)
 fun TaskLink.toEntity() = TaskLinkEntity(parentId, childId, createdAt)
+
+fun TaskAttachmentEntity.toDomain() = TaskAttachment(
+    id = id,
+    taskId = taskId,
+    relativePath = relativePath,
+    mimeType = mimeType,
+    createdAt = createdAt,
+    sortOrder = sortOrder
+)
+
+fun TaskAttachment.toEntity() = TaskAttachmentEntity(
+    id = id,
+    taskId = taskId,
+    relativePath = relativePath,
+    mimeType = mimeType,
+    createdAt = createdAt,
+    sortOrder = sortOrder
+)

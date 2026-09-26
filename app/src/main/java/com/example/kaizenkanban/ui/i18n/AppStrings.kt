@@ -227,32 +227,32 @@ fun eisenhowerTitle(quadrant: String?): String = when (quadrant) {
         "Как открыть все проекты?"
     )
     val gesturesGuideOpenProjectsBody get() = t(
-        "Double-tap the board name at the top of the screen.",
-        "Дважды нажмите на название доски вверху экрана."
+        "Tap the board name at the top of the screen once.",
+        "Один раз нажмите на название доски вверху экрана."
     )
     val gesturesGuideSwitchListsTitle get() = t(
         "How do I switch to another list of tasks?",
         "Как перейти к другому списку задач?"
     )
     val gesturesGuideSwitchListsBody get() = t(
-        "Swipe left or right with your finger.",
-        "Проведите пальцем влево или вправо."
+        "Swipe left or right between hubs.",
+        "Листайте хабы влево или вправо."
     )
     val gesturesGuideShowMenuTitle get() = t(
         "How do I show or hide the top menu?",
         "Как показать или спрятать верхнее меню?"
     )
     val gesturesGuideShowMenuBody get() = t(
-        "Pull the task list down — the menu appears.\nDouble-tap the list name — the menu hides or shows again.",
-        "Потяните список задач вниз — меню появится.\nДважды нажмите на название списка — меню скроется или снова покажется."
+        "Pull the task list down — the menu appears.\nDouble-tap the hub title — the menu hides or shows again.",
+        "Потяните список задач вниз — меню появится.\nДважды нажмите на название хаба — меню скроется или снова покажется."
     )
     val gesturesGuideMoveTaskTitle get() = t(
         "How do I move a task?",
         "Как переместить задачу?"
     )
     val gesturesGuideMoveTaskBody get() = t(
-        "Hold the card with your finger, then drag it to a new place or another list.",
-        "Удерживайте карточку пальцем и перетащите в нужное место или в другой список."
+        "Hold the card with your finger, then drag it to a new place or another hub.",
+        "Удерживайте карточку пальцем и перетащите в нужное место или в другой хаб."
     )
     val gesturesGuideEditTaskTitle get() = t(
         "How do I rename a task?",
@@ -267,16 +267,16 @@ fun eisenhowerTitle(quadrant: String?): String = when (quadrant) {
         "Как прочитать длинное название целиком?"
     )
     val gesturesGuideLongTitleBody get() = t(
-        "Tap the text once — it will scroll. Tap again to stop.",
-        "Нажмите на текст один раз — он побежит. Нажмите ещё раз, чтобы остановить."
+        "Tap the text once — it expands. Tap again to collapse.",
+        "Нажмите на текст один раз — он раскроется. Нажмите ещё раз, чтобы свернуть."
     )
     val gesturesGuideMoreActionsTitle get() = t(
         "Where are the other actions?",
         "Где остальные действия?"
     )
     val gesturesGuideMoreActionsBody get() = t(
-        "Tap the three dots (⋮) on the task, on the list, or at the top of the board.",
-        "Нажмите на три точки (⋮) у задачи, у списка или вверху у доски."
+        "Tap the three dots (⋮) on the task, on the hub, or at the top of the board.",
+        "Нажмите на три точки (⋮) у задачи, у хаба или вверху у доски."
     )
     val gesturesGuideInProgressTitle get() = t(
         "How do I mark what I’m doing right now?",
@@ -293,6 +293,30 @@ fun eisenhowerTitle(quadrant: String?): String = when (quadrant) {
     val gesturesGuideDueDateBody get() = t(
         "Open the task menu (⋮) and pick a day — for example Today or Tomorrow.",
         "Откройте меню задачи (⋮) и выберите день — например «Сегодня» или «Завтра»."
+    )
+    val gesturesGuideSelectGroupTitle get() = t(
+        "How do I group tasks in a hub?",
+        "Как сгруппировать задачи в хабе?"
+    )
+    val gesturesGuideSelectGroupBody get() = t(
+        "Long-press a card to select, tap more cards, then use the grid/group icon at the bottom. The × on the group header splits them again.",
+        "Долгое нажатие на карточку — выбор, затем отметьте ещё задачи и нажмите значок сетки внизу. Крестик на заголовке группы снимает её."
+    )
+    val gesturesGuideLinkGoalTitle get() = t(
+        "How do I link a task to a goal?",
+        "Как привязать задачу к цели?"
+    )
+    val gesturesGuideLinkGoalBody get() = t(
+        "In the task menu (⋮) choose link to goal, tap a goal or step, then confirm with the checkmark.",
+        "В меню задачи (⋮) выберите привязку к цели, нажмите на цель или шаг, затем подтвердите галочкой."
+    )
+    val gesturesGuidePhotosTitle get() = t(
+        "How do I add a photo to a task?",
+        "Как добавить фото к задаче?"
+    )
+    val gesturesGuidePhotosBody get() = t(
+        "In the task menu (⋮) open Photos — take a picture or pick from the gallery.",
+        "В меню задачи (⋮) откройте «Фото» — снимите кадр или выберите из галереи."
     )
 
     val openSystemNotifications get() = t("Notification settings", "Настройки уведомлений")
@@ -541,8 +565,13 @@ fun eisenhowerTitle(quadrant: String?): String = when (quadrant) {
     )
     val statsGuideChanceTitle get() = t("Likelihood of completion", "Вероятность выполнения")
     val statsGuideChanceBody get() = t(
-        "A rough heuristic, not a real probability — a compass for whether you are on track to finish the goal. Shown on Total.",
-        "Грубая эвристика, не настоящая вероятность — компас, насколько вы на пути довести цель. Показывается на «Всего»."
+        "A rough heuristic, not a real probability — a compass for finishing the goal. It weighs movement, recent momentum, rhythm, staying on-goal, and how wide the plan is (several different steps beat one habit alone). Shown on Total.",
+        "Грубая эвристика, не настоящая вероятность — компас, насколько вы на пути довести цель. Учитывает движение, импульс периода, ритм, долю «мимо цели» и ширину плана (несколько разных шагов лучше одной привычки). Показывается на «Всего»."
+    )
+    val statsGuidePlanBreadthTitle get() = t("Plan breadth", "Ширина плана")
+    val statsGuidePlanBreadthBody get() = t(
+        "How many different levers the goal has and whether recent work touched more than one. Empty cards do not help much; one recurring habit on a multi-step goal scores lower.",
+        "Сколько разных рычагов у цели и задеты ли они недавней работой. Пустые карточки почти не помогают; одна регулярная привычка при нескольких шагах оценивается ниже."
     )
     val statsGuidePeriodAssessmentTitle get() = t("Period tab", "Вкладка «Период»")
     val statsGuidePeriodAssessmentBody get() = t(
@@ -574,7 +603,8 @@ fun eisenhowerTitle(quadrant: String?): String = when (quadrant) {
     fun statsPeriodDelta(pp: Int, period: com.example.kaizenkanban.domain.stats.StatsPeriod): String {
         val sign = if (pp >= 0) "+" else ""
         val window = when (period) {
-            com.example.kaizenkanban.domain.stats.StatsPeriod.DAY -> t("day", "день")
+            com.example.kaizenkanban.domain.stats.StatsPeriod.TODAY -> t("today", "сегодня")
+            com.example.kaizenkanban.domain.stats.StatsPeriod.YESTERDAY -> t("yesterday", "вчера")
             com.example.kaizenkanban.domain.stats.StatsPeriod.WEEK -> t("week", "неделю")
             com.example.kaizenkanban.domain.stats.StatsPeriod.MONTH -> t("month", "месяц")
             com.example.kaizenkanban.domain.stats.StatsPeriod.MONTHS_3 -> t("3 months", "3 месяца")
@@ -612,6 +642,15 @@ fun eisenhowerTitle(quadrant: String?): String = when (quadrant) {
     val statsChanceTitle get() = t("Likelihood of completion", "Вероятность выполнения")
     fun statsForecastRhythmBonus(pp: Int) = t("Rhythm +$pp%", "Ритм +$pp%")
     fun statsForecastTriviaPenalty(pp: Int) = t("Off goal −$pp%", "Мимо цели −$pp%")
+    fun statsPlanBreadthLabel(breadth: Float): String = when {
+        breadth < 0.34f -> t("narrow", "узкий")
+        breadth < 0.67f -> t("ok", "норма")
+        else -> t("wide", "широкий")
+    }
+    fun statsPlanBreadthLine(breadth: Float, branches: Int, touched: Int) = t(
+        "Plan: ${statsPlanBreadthLabel(breadth)} · $branches levers · $touched touched",
+        "План: ${statsPlanBreadthLabel(breadth)} · $branches рычагов · $touched задеты"
+    )
     val statsChartAxisCount get() = t("count", "шт.")
     val importanceLabel get() = t("Importance", "Важность")
     val statsEditTask get() = t("Edit details", "Параметры")
@@ -625,7 +664,8 @@ fun eisenhowerTitle(quadrant: String?): String = when (quadrant) {
     fun statsPeriodLabel(period: com.example.kaizenkanban.domain.stats.StatsPeriod): String =
         when (period) {
             com.example.kaizenkanban.domain.stats.StatsPeriod.NOW -> t("Total", "Всего")
-            com.example.kaizenkanban.domain.stats.StatsPeriod.DAY -> t("Day", "День")
+            com.example.kaizenkanban.domain.stats.StatsPeriod.TODAY -> t("Today", "Сегодня")
+            com.example.kaizenkanban.domain.stats.StatsPeriod.YESTERDAY -> t("Yesterday", "Вчера")
             com.example.kaizenkanban.domain.stats.StatsPeriod.WEEK -> t("Week", "Неделя")
             com.example.kaizenkanban.domain.stats.StatsPeriod.MONTH -> t("Month", "Месяц")
             com.example.kaizenkanban.domain.stats.StatsPeriod.MONTHS_3 -> t("3 months", "3 месяца")
@@ -634,8 +674,10 @@ fun eisenhowerTitle(quadrant: String?): String = when (quadrant) {
         }
     fun statsHowPeriodWent(period: com.example.kaizenkanban.domain.stats.StatsPeriod): String =
         when (period) {
-            com.example.kaizenkanban.domain.stats.StatsPeriod.DAY ->
-                t("How did the day go", "Как прошёл день")
+            com.example.kaizenkanban.domain.stats.StatsPeriod.TODAY ->
+                t("How is today going", "Как идёт сегодня")
+            com.example.kaizenkanban.domain.stats.StatsPeriod.YESTERDAY ->
+                t("How did yesterday go", "Как прошёл вчерашний день")
             com.example.kaizenkanban.domain.stats.StatsPeriod.WEEK ->
                 t("How did the week go", "Как прошла неделя")
             com.example.kaizenkanban.domain.stats.StatsPeriod.MONTH ->
@@ -657,6 +699,96 @@ fun eisenhowerTitle(quadrant: String?): String = when (quadrant) {
         "Старые закрытые шаги перестанут считаться для этой цели. История останется в Архиве."
     )
     val statsProgressDelta get() = t("Progress change", "Изменение прогресса")
+    val statsChanceDelta get() = t("Likelihood change", "Изменение вероятности")
+    val aiPromptsTitle get() = t("AI prompts", "Промпты для ИИ")
+    val aiPromptsRowHint get() = t(
+        "Copy ready prompts for ChatGPT, DeepSeek…",
+        "Готовые тексты для ChatGPT, DeepSeek…"
+    )
+    val aiPromptsIntro get() = t(
+        "Choose a goal, then copy a prompt and paste it into any AI chat. The text includes your current steps in plain language.",
+        "Выберите цель, скопируйте промпт и вставьте в любой чат с ИИ. В тексте уже есть ваши шаги простыми словами."
+    )
+    val aiPromptsGoalLabel get() = t("Goal for the prompt", "Цель для промпта")
+    val aiPromptsNoGoals get() = t(
+        "Mark a task as a goal first (More on the card), then come back here.",
+        "Сначала отметьте задачу как цель (Ещё на карточке), потом вернитесь сюда."
+    )
+    val aiPromptsNeedGoal get() = t("Select a goal first", "Сначала выберите цель")
+    val aiPromptsCopied get() = t(
+        "Prompt copied — paste it into any AI chat",
+        "Промпт скопирован — вставьте в любой чат с ИИ"
+    )
+    val aiPromptsCopyAction get() = t("Copy prompt", "Копировать промпт")
+    fun aiPromptKindTitle(kind: com.example.kaizenkanban.domain.stats.GoalAiPromptKind): String =
+        when (kind) {
+            com.example.kaizenkanban.domain.stats.GoalAiPromptKind.PLAN ->
+                t("Plan next steps", "Спланировать шаги")
+            com.example.kaizenkanban.domain.stats.GoalAiPromptKind.GAPS ->
+                t("Find gaps", "Найти пробелы")
+            com.example.kaizenkanban.domain.stats.GoalAiPromptKind.WEEK ->
+                t("Plan the next 7 days", "План на 7 дней")
+            com.example.kaizenkanban.domain.stats.GoalAiPromptKind.REFACTOR ->
+                t("Simplify the step list", "Упростить список шагов")
+            com.example.kaizenkanban.domain.stats.GoalAiPromptKind.RECURRING ->
+                t("Suggest repeating habits", "Предложить привычки")
+            com.example.kaizenkanban.domain.stats.GoalAiPromptKind.RETRO ->
+                t("Review how it’s going", "Разобрать, как идёт")
+            com.example.kaizenkanban.domain.stats.GoalAiPromptKind.CRITERIA ->
+                t("Define success criteria", "Критерии успеха")
+            com.example.kaizenkanban.domain.stats.GoalAiPromptKind.CHANCE ->
+                t("Estimate chance of success", "Оценить шансы на успех")
+            com.example.kaizenkanban.domain.stats.GoalAiPromptKind.IMPACT ->
+                t("Rate step Impact (1–5)", "Оценить вклад шагов (1–5)")
+        }
+    fun aiPromptKindHint(kind: com.example.kaizenkanban.domain.stats.GoalAiPromptKind): String =
+        when (kind) {
+            com.example.kaizenkanban.domain.stats.GoalAiPromptKind.PLAN ->
+                t(
+                    "One-time steps and habits toward the goal",
+                    "Разовые шаги и привычки к цели"
+                )
+            com.example.kaizenkanban.domain.stats.GoalAiPromptKind.GAPS ->
+                t(
+                    "What’s missing or stuck, and what to fix",
+                    "Что не хватает или буксует, и что поправить"
+                )
+            com.example.kaizenkanban.domain.stats.GoalAiPromptKind.WEEK ->
+                t(
+                    "Realistic checklist from steps still open",
+                    "Реалистичный чеклист из ещё открытых шагов"
+                )
+            com.example.kaizenkanban.domain.stats.GoalAiPromptKind.REFACTOR ->
+                t(
+                    "Rename, merge, and tidy the structure",
+                    "Переименовать, объединить и навести порядок"
+                )
+            com.example.kaizenkanban.domain.stats.GoalAiPromptKind.RECURRING ->
+                t(
+                    "Only habits: how often and why",
+                    "Только привычки: как часто и зачем"
+                )
+            com.example.kaizenkanban.domain.stats.GoalAiPromptKind.RETRO ->
+                t(
+                    "What worked, what stalled, what to change",
+                    "Что сработало, что буксует, что менять"
+                )
+            com.example.kaizenkanban.domain.stats.GoalAiPromptKind.CRITERIA ->
+                t(
+                    "Clear checks that mean the goal is done",
+                    "Понятные признаки, что цель достигнута"
+                )
+            com.example.kaizenkanban.domain.stats.GoalAiPromptKind.CHANCE ->
+                t(
+                    "How realistic the goal looks now, and how to raise odds",
+                    "Насколько реалистична цель сейчас и как повысить шансы"
+                )
+            com.example.kaizenkanban.domain.stats.GoalAiPromptKind.IMPACT ->
+                t(
+                    "How much each step moves the goal — not how hard it is",
+                    "Насколько каждый шаг двигает цель — не насколько он тяжёлый"
+                )
+        }
     fun weekCompleted(count: Int) = t(
         "$count done",
         "$count готово"
@@ -754,25 +886,76 @@ fun eisenhowerTitle(quadrant: String?): String = when (quadrant) {
     fun movedToHub(name: String) = t("Moved to ${quoted(name)}", "Перемещено в ${quoted(name)}")
     fun completedCount(count: Int) = t("Done ($count)", "Выполнено ($count)")
     fun notDoneCount(count: Int) = t("Not done ($count)", "Не выполнено ($count)")
-    val taskLinksTitle get() = t("Task links", "Связи задачи")
-    val taskParents get() = t("Goals (parents)", "Цели (родители)")
-    val taskChildren get() = t("Steps (children)", "Шаги (дети)")
-    val taskLinksEmptyParents get() = t("No parent goals yet", "Пока нет родительских целей")
+    val taskLinksTitle get() = t("Goals & steps", "Цели и шаги")
+    val taskParents get() = t("Goals", "Цели")
+    val taskChildren get() = t("Steps", "Шаги")
+    val taskLinksEmptyParents get() = t("Not linked to a goal yet", "Пока не привязано к цели")
     val taskLinksEmptyChildren get() = t("No steps yet", "Пока нет шагов")
-    val pickParentTask get() = t("Pick a parent goal", "Выберите родительскую цель")
+    val pickParentTask get() = t("Pick a goal", "Выберите цель")
     val pickChildTask get() = t("Pick a step", "Выберите шаг")
     val noTasksToLink get() = t("No suitable tasks", "Нет подходящих задач")
+    val noGoalsToLink get() = t("No goals yet — mark a task as a goal first", "Пока нет целей — сначала пометьте задачу как цель")
     val taskLinkCycleRejected get() = t("That link would create a cycle", "Такая связь создаст цикл")
     fun parentChip(title: String) = t("↑ $title", "↑ $title")
     fun childrenChip(count: Int) = t("↓ $count", "↓ $count")
     fun childrenChipLabel(title: String) = t("↓ $title", "↓ $title")
-    val manageTaskLinks get() = t("Links", "Связи")
-    val addParentLink get() = t("Add parent goal", "Добавить цель")
-    val addChildLink get() = t("Add step", "Добавить шаг")
+    fun linkedToGoal(title: String) = t("Goal: $title", "К цели: $title")
+    fun linkedToGoalsCount(count: Int) = t("Goals: $count", "К целям: $count")
+    val linkToGoal get() = t("Link to goal", "Привязать к цели")
+    val manageTaskLinks get() = t("Goals & steps", "Цели и шаги")
+    val goalSteps get() = t("Goal steps", "Шаги цели")
+    val addParentLink get() = t("Link to goal", "К какой цели?")
+    val addChildLink get() = t("Link existing step", "Привязать шаг")
+    val createStep get() = t("New step", "+ шаг")
+    val createStepTitle get() = t("New step under goal", "Новый шаг к цели")
+    val createStepHint get() = t("Step title", "Название шага")
+    val linkAdvanced get() = t("More link options", "Дополнительно")
     val unknownHub get() = t("Other hub", "Другой хаб")
-    val linkFocusMode get() = t("Link focus", "Режим связей")
+    val linkFocusMode get() = t("Related tasks", "Связанные задачи")
     val linkFocusExit get() = t("Show all", "Показать все")
-    val linkFocusEmptyHub get() = t("No linked tasks in this hub", "В этом хабе нет связанных задач")
+    val linkFocusEmptyHub get() = t("No related tasks in this hub", "В этом хабе нет связанных задач")
+    fun linkPickParentMode(title: String) = t(
+        "Pick a parent for ${quoted(title)}",
+        "Выберите родителя для ${quoted(title)}"
+    )
+    val linkPickParentHint get() = t(
+        "Tap a goal or step, then confirm with the checkmark — confirm again to unlink",
+        "Нажмите на цель или шаг, затем подтвердите галочкой — ещё раз галочкой, чтобы отвязать"
+    )
+    val linkPickConfirm get() = t("Confirm link", "Подтвердить связь")
+    val linkPickSelectFirst get() = t("Select a goal first", "Сначала выберите цель")
+    fun linkParentLinked(title: String) = t("Linked to ${quoted(title)}", "Привязано к ${quoted(title)}")
+    fun linkParentUnlinked(title: String) = t("Unlinked from ${quoted(title)}", "Отвязано от ${quoted(title)}")
+    val linkPickEmpty get() = t(
+        "No goals on the board yet — mark a task as a goal first",
+        "На доске пока нет целей — сначала пометьте задачу как цель"
+    )
+    val selectTasks get() = t("Select", "Выбрать")
+    val resetHubGroups get() = t("Clear groups", "Сбросить группы")
+    val groupTasks get() = t("Group", "Сгруппировать")
+    val ungroupTasks get() = t("Ungroup", "Разгруппировать")
+    val cancelSelection get() = t("Cancel", "Отмена")
+    fun selectedCount(count: Int) = t("Selected: $count", "Выбрано: $count")
+    val hubGroupLabel get() = t("Group", "Группа")
+    val groupNeedTwo get() = t("Select at least 2 tasks", "Выберите хотя бы 2 задачи")
+    val groupSameHubOnly get() = t("Group tasks from the same hub", "Группируйте задачи одного хаба")
+    val taskDescription get() = t("Notes", "Заметки")
+    val taskDescriptionHint get() = t("Short notes for this task", "Краткие заметки к задаче")
+    val taskPhotos get() = t("Photos", "Фото")
+    fun taskPhotosCount(count: Int) = t("Photos ($count)", "Фото ($count)")
+    val taskPhotosEmpty get() = t("No photos yet", "Пока нет фото")
+    val taskPhotosAdd get() = t("Add photo", "Добавить фото")
+    val takePhoto get() = t("Take photo", "Сфотографировать")
+    val cameraPermissionNeeded get() = t(
+        "Camera permission is required to take photos",
+        "Для съёмки нужно разрешение на камеру"
+    )
+    val taskPhotosLimit get() = t("Up to 10 photos per task", "Не больше 10 фото на задачу")
+    val taskPhotosDelete get() = t("Delete photo", "Удалить фото")
+    val exportPhotosWarning get() = t(
+        "JSON backup does not include photo files",
+        "JSON-бэкап не включает файлы фото"
+    )
     fun moreTasksCount(count: Int) = t("+$count more", "ещё $count")
     fun clearCompletedText(count: Int, hub: String) = t(
         "Move these $count completed tasks from hub ${quoted(hub)} to Archive? They leave the board but stay in Review.",
@@ -811,8 +994,8 @@ fun eisenhowerTitle(quadrant: String?): String = when (quadrant) {
     val proSection get() = t("Kairos PRO", "Kairos PRO")
     val proUnlockedStub get() = t("PRO unlocked (stub)", "PRO включён (заглушка)")
     val proUnlockedStubHint get() = t(
-        "Temporary switch until Play Billing. Voice dictate uses this flag.",
-        "Временный переключатель до Play Billing. Голосовой ввод смотрит на него."
+        "Temporary switch until Play Billing. Voice and task photos use this flag.",
+        "Временный переключатель до Play Billing. Голос и фото к задачам смотрят на него."
     )
     val voiceHintExamples get() = t(
         "Tap the mic and say the task title, e.g. «buy milk»",

@@ -22,4 +22,22 @@ class EnsureRecurringInstancesLogicTest {
         assertEquals(setOf(1, 4), weekdaysForLegacyTimesPerWeek(2))
         assertEquals((1..7).toSet(), weekdaysForLegacyTimesPerWeek(7))
     }
+
+    @Test
+    fun occurrenceKeyStableForDayAndMinutes() {
+        val day = EnsureRecurringInstancesUseCase.startOfDay(System.currentTimeMillis())
+        assertEquals("$day:540", EnsureRecurringInstancesUseCase.occurrenceKey(day, 540))
+    }
+
+    @Test
+    fun pruneSkippedKeysDropsOldEntries() {
+        val today = EnsureRecurringInstancesUseCase.startOfDay(System.currentTimeMillis())
+        val old = today - 90L * 24 * 60 * 60 * 1000
+        val recent = today - 5L * 24 * 60 * 60 * 1000
+        val pruned = EnsureRecurringInstancesUseCase.pruneSkippedKeys(
+            listOf("$old:540", "$recent:540", "bad", "$today:900"),
+            now = today + 12 * 60 * 60 * 1000
+        )
+        assertEquals(listOf("$recent:540", "$today:900"), pruned)
+    }
 }

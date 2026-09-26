@@ -91,6 +91,7 @@ object KairosTransferHelper {
             obj.put("statsExcluded", t.statsExcluded)
             obj.put("isGoal", t.isGoal)
             if (t.goalStatsEpochMillis != null) obj.put("goalStatsEpochMillis", t.goalStatsEpochMillis)
+            if (t.hubGroupId != null) obj.put("hubGroupId", t.hubGroupId)
             if (t.linkedColumnIds.isNotEmpty()) {
                 val linkedArr = JSONArray()
                 t.linkedColumnIds.forEach { linkedArr.put(it) }
@@ -251,6 +252,9 @@ object KairosTransferHelper {
                     isGoal = obj.optBoolean("isGoal", false),
                     goalStatsEpochMillis = if (obj.has("goalStatsEpochMillis") && !obj.isNull("goalStatsEpochMillis")) {
                         obj.getLong("goalStatsEpochMillis")
+                    } else null,
+                    hubGroupId = if (obj.has("hubGroupId") && !obj.isNull("hubGroupId")) {
+                        obj.getString("hubGroupId")
                     } else null,
                     linkedColumnIds = buildList {
                         val linkedArr = obj.optJSONArray("linkedColumnIds")

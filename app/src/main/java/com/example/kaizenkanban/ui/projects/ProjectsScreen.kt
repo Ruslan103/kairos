@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DragHandle
@@ -120,6 +121,7 @@ fun ProjectsScreen(
     onNavigateToRecurring: (projectId: String) -> Unit = {},
     onNavigateToEisenhower: (projectId: String) -> Unit = {},
     onNavigateToStats: (projectId: String) -> Unit = {},
+    onNavigateToAiPrompts: (projectId: String) -> Unit = {},
     consumePendingQuickAdd: Boolean = true
 ) {
     val state by viewModel.state.collectAsState()
@@ -771,6 +773,7 @@ fun ProjectsScreen(
                         onOpenRecurring = { onNavigateToRecurring(project.id) },
                         onOpenEisenhower = { onNavigateToEisenhower(project.id) },
                         onOpenStats = { onNavigateToStats(project.id) },
+                        onOpenAiPrompts = { onNavigateToAiPrompts(project.id) },
                         onSetDefault = { board ->
                             if (board.isDefault) viewModel.clearDefaultBoard()
                             else viewModel.setDefaultBoard(board.id)
@@ -1286,6 +1289,7 @@ fun ProjectCard(
     onOpenRecurring: () -> Unit = {},
     onOpenEisenhower: () -> Unit = {},
     onOpenStats: () -> Unit = {},
+    onOpenAiPrompts: () -> Unit = {},
     onSetDefault: (Board) -> Unit,
     onRenameProject: () -> Unit,
     onDeleteProject: () -> Unit,
@@ -1491,6 +1495,8 @@ fun ProjectCard(
             EisenhowerProjectRow(onOpen = onOpenEisenhower)
             Spacer(modifier = Modifier.height(2.dp))
             StatsProjectRow(onOpen = onOpenStats)
+            Spacer(modifier = Modifier.height(2.dp))
+            AiPromptsProjectRow(onOpen = onOpenAiPrompts)
 
             Spacer(modifier = Modifier.height(14.dp))
             
@@ -1663,6 +1669,48 @@ private fun StatsProjectRow(onOpen: () -> Unit) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        Icon(
+            imageVector = Icons.Default.KeyboardArrowRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun AiPromptsProjectRow(onOpen: () -> Unit) {
+    val s = LocalAppStrings.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(onClick = onOpen)
+            .padding(vertical = 10.dp, horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = Icons.Default.ContentCopy,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(22.dp)
+        )
+        Spacer(modifier = Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = s.aiPromptsTitle,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = s.aiPromptsRowHint,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis
             )
         }

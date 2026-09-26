@@ -18,7 +18,8 @@ class ProjectStatsCalculatorTest {
         completedAt: Long? = null,
         workflow: String = if (completed) TaskWorkflow.DONE else TaskWorkflow.OPEN,
         quadrant: String? = null,
-        isGoal: Boolean = false
+        isGoal: Boolean = false,
+        recurringTemplateId: String? = null
     ) = Task(
         id = id,
         columnId = "c",
@@ -34,7 +35,8 @@ class ProjectStatsCalculatorTest {
         completionQuality = quality,
         workflowStatus = workflow,
         eisenhowerQuadrant = quadrant,
-        isGoal = isGoal
+        isGoal = isGoal,
+        recurringTemplateId = recurringTemplateId
     )
 
     @Test
@@ -145,5 +147,126 @@ class ProjectStatsCalculatorTest {
         )
         // (2*1 + 2*0) / 4 = 0.5 — same as live weighted children case
         assertEquals(0.5f, p, 0.001f)
+    }
+
+    @Test
+    fun planBreadth_narrowSingleBranchVsWideFourBranches() {
+        val now = 1_700_000_000_000L
+        val doneAt = now - 2_000L
+
+        val narrowTasks = listOf(
+            task("g", isGoal = true),
+            task(
+                "words",
+                completed = true,
+                complexity = 1,
+                completedAt = doneAt,
+                recurringTemplateId = "tpl-words"
+            )
+        )
+        val narrowLinks = listOf(TaskLink("g", "words"))
+        val narrow = ProjectStatsCalculator.computePlanBreadth(
+            goalId = "g",
+            tasksById = narrowTasks.associateBy { it.id },
+            links = narrowLinks,
+            liveDone = narrowTasks.filter { it.isCompleted },
+            journalDone = emptyList()
+        )
+
+        val wideTasks = listOf(
+            task("g", isGoal = true),
+            task("words", completed = true, complexity = 1, completedAt = doneAt),
+            task("listen", completed = true, complexity = 1, completedAt = doneAt),
+            task("speak", completed = true, complexity = 1, completedAt = doneAt),
+            task("grammar", completed = true, complexity = 1, completedAt = doneAt)
+        )
+        val wideLinks = listOf(
+            TaskLink("g", "words"),
+            TaskLink("g", "listen"),
+            TaskLink("g", "speak"),
+            TaskLink("g", "grammar")
+        )
+        val wide = ProjectStatsCalculator.computePlanBreadth(
+            goalId = "g",
+            tasksById = wideTasks.associateBy { it.id },
+            links = wideLinks,
+            liveDone = wideTasks.filter { it.isCompleted },
+            journalDone = emptyList()
+        )
+
+        assertEquals(1, narrow.branchCount)
+        assertEquals(4, wide.branchCount)
+        assertEquals(4, wide.touchedBranchCount)
+        assertTrue(
+            "wide breadth (${wide.breadth}) should exceed narrow (${narrow.breadth})",
+            wide.breadth > narrow.breadth + 0.15f
+        )
+        assertTrue(wide.breadth in 0.85f..1.01f)
+        assertTrue(narrow.breadth < 0.45f)
+    }
+
+    @Test
+    fun planBreadth_recurringConcentrationPenaltyOnMultiBranch() {
+        val now = 1_700_000_000_000L
+        val doneAt = now - 1_000L
+        val tasks = listOf(
+            task("g", isGoal = true),
+            task(
+                "words",
+                completed = true,
+                complexity = 2,
+                completedAt = doneAt,
+                recurringTemplateId = "tpl-words"
+            ),
+            task("listen", completed = false, complexity = 1),
+            task("speak", completed = false, complexity = 1)
+        )
+        val links = listOf(
+            TaskLink("g", "words"),
+            TaskLink("g", "listen"),
+            TaskLink("g", "speak")
+        )
+        val concentrated = ProjectStatsCalculator.computePlanBreadth(
+            goalId = "g",
+            tasksById = tasks.associateBy { it.id },
+            links = links,
+            liveDone = tasks.filter { it.isCompleted },
+            journalDone = emptyList()
+        )
+        // Coverage 3/4=0.75, diversity 1/3≈0.33 → raw ~0.56, then *0.72 for concentration
+        assertEquals(3, concentrated.branchCount)
+        assertEquals(1, concentrated.touchedBranchCount)
+        assertTrue(concentrated.breadth < 0.50f)
+        assertTrue(concentrated.breadth > 0.20f)
+    }
+
+    @Test
+    fun chance_widePlanBeatsNarrowHabitWithoutDoubling() {
+        val hat = 0.5f
+        val progress = 0.4f
+        val delta = 0.1f
+        val rhythm = 0.8f
+        val trivia = 0.1f
+        val narrowChance = ProjectStatsCalculator.chanceToComplete(
+            hatP = hat,
+            progress = progress,
+            periodDelta = delta,
+            rhythmShare = rhythm,
+            triviaShare = trivia,
+            planBreadth = 0.25f
+        )
+        val wideChance = ProjectStatsCalculator.chanceToComplete(
+            hatP = hat,
+            progress = progress,
+            periodDelta = delta,
+            rhythmShare = rhythm,
+            triviaShare = trivia,
+            planBreadth = 1.0f
+        )
+        assertTrue(wideChance > narrowChance)
+        // 10% weight on breadth → delta ≈ 0.075, not a doubling
+        val deltaChance = wideChance - narrowChance
+        assertTrue(deltaChance in 0.05f..0.12f)
+        assertTrue(wideChance < narrowChance * 1.5f)
     }
 }

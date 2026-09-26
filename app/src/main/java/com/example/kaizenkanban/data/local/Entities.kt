@@ -60,7 +60,8 @@ data class TaskEntity(
     val isBoardArchived: Boolean = false,
     val statsExcluded: Boolean = false,
     val isGoal: Boolean = false,
-    val goalStatsEpochMillis: Long? = null
+    val goalStatsEpochMillis: Long? = null,
+    val hubGroupId: String? = null
 )
 
 @Entity(tableName = "stats_journal")
@@ -105,6 +106,8 @@ data class RecurringTemplateEntity(
     /** Comma-separated child task ids for spawned instances */
     val linkChildIds: String = "",
     val complexity: Int? = null,
+    /** Comma-separated `"dayStart:minutes"` keys for dismissed occurrences */
+    val skippedOccurrenceKeys: String = "",
     val createdAt: Long
 )
 
@@ -143,4 +146,14 @@ data class TaskLinkEntity(
     val parentId: String,
     val childId: String,
     val createdAt: Long = 0L
+)
+
+@Entity(tableName = "task_attachments")
+data class TaskAttachmentEntity(
+    @PrimaryKey val id: String,
+    val taskId: String,
+    val relativePath: String,
+    val mimeType: String = "image/jpeg",
+    val createdAt: Long = 0L,
+    val sortOrder: Int = 0
 )

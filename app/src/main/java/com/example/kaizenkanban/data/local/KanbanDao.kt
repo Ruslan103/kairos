@@ -185,6 +185,22 @@ interface KanbanDao {
     @Query("DELETE FROM task_links WHERE parentId = :taskId OR childId = :taskId")
     suspend fun deleteTaskLinksForTask(taskId: String)
 
+    // Task attachments (local photos)
+    @Query("SELECT * FROM task_attachments ORDER BY sortOrder ASC, createdAt ASC")
+    fun getAllTaskAttachments(): Flow<List<TaskAttachmentEntity>>
+
+    @Query("SELECT * FROM task_attachments WHERE taskId = :taskId ORDER BY sortOrder ASC, createdAt ASC")
+    suspend fun getAttachmentsForTask(taskId: String): List<TaskAttachmentEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertTaskAttachment(attachment: TaskAttachmentEntity)
+
+    @Query("DELETE FROM task_attachments WHERE id = :id")
+    suspend fun deleteTaskAttachment(id: String)
+
+    @Query("DELETE FROM task_attachments WHERE taskId = :taskId")
+    suspend fun deleteAttachmentsByTask(taskId: String)
+
     // Stats journal (survives hard-delete from Archive)
     @Query("SELECT * FROM stats_journal ORDER BY eventAt DESC")
     fun getAllStatsJournal(): Flow<List<StatsJournalEntity>>

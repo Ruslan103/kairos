@@ -29,6 +29,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.example.kaizenkanban.data.local.KairosPreferences
 import com.example.kaizenkanban.domain.model.Task
+import com.example.kaizenkanban.ui.aiprompts.AiPromptsScreen
 import com.example.kaizenkanban.ui.board.BoardScreen
 import com.example.kaizenkanban.ui.calendar.CalendarScreen
 import com.example.kaizenkanban.ui.eisenhower.EisenhowerMatrixScreen
@@ -235,6 +236,11 @@ fun AppNavigation(
                             navController.navigate("stats/$projectId") {
                                 launchSingleTop = true
                             }
+                        },
+                        onNavigateToAiPrompts = { projectId ->
+                            navController.navigate("aiPrompts/$projectId") {
+                                launchSingleTop = true
+                            }
                         }
                     )
                 }
@@ -272,6 +278,11 @@ fun AppNavigation(
                     navController.navigate("stats/$projectId") {
                         launchSingleTop = true
                     }
+                },
+                onNavigateToAiPrompts = { projectId ->
+                    navController.navigate("aiPrompts/$projectId") {
+                        launchSingleTop = true
+                    }
                 }
             )
         }
@@ -294,6 +305,18 @@ fun AppNavigation(
         ) { backStackEntry ->
             val projectId = backStackEntry.arguments?.getString("projectId") ?: return@composable
             StatsScreen(
+                projectId = projectId,
+                viewModel = sharedViewModel,
+                onBack = { navController.popBackStack() }
+            )
+        }
+
+        composable(
+            route = "aiPrompts/{projectId}",
+            arguments = listOf(navArgument("projectId") { type = NavType.StringType })
+        ) { backStackEntry ->
+            val projectId = backStackEntry.arguments?.getString("projectId") ?: return@composable
+            AiPromptsScreen(
                 projectId = projectId,
                 viewModel = sharedViewModel,
                 onBack = { navController.popBackStack() }

@@ -1,7 +1,15 @@
 package com.example.kaizenkanban.ui.board
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
+import java.io.File
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -90,6 +98,8 @@ import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Flag
+import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Settings
@@ -144,6 +154,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import com.example.kaizenkanban.data.local.KairosPreferences
+import com.example.kaizenkanban.pro.Entitlements
+import com.example.kaizenkanban.pro.ProFeature
 import com.example.kaizenkanban.widget.KairosWidgetUpdater
 import com.example.kaizenkanban.reminders.DueReminderScheduler
 import com.example.kaizenkanban.ui.calendar.DueDateQuickPick
@@ -169,6 +181,7 @@ import java.util.Locale
 import com.example.kaizenkanban.domain.model.Board
 import com.example.kaizenkanban.domain.model.Column
 import com.example.kaizenkanban.domain.model.Task
+import com.example.kaizenkanban.domain.model.TaskAttachment
 import com.example.kaizenkanban.domain.model.Comment
 import com.example.kaizenkanban.domain.model.ColumnComment
 import com.example.kaizenkanban.domain.model.Project
@@ -406,6 +419,15 @@ fun BoardScreen(
     var linkFocusIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var linkFocusAnchorId by remember { mutableStateOf<String?>(null) }
     var linksDialogTask by remember { mutableStateOf<Task?>(null) }
+    /** When set, board shows only goals + their steps; tap assigns parent to this task. */
+    var linkPickParentFor by remember { mutableStateOf<Task?>(null) }
+    /** Candidate parent selected in pick mode; link applies only after confirm. */
+    var linkPickPendingParentId by remember { mutableStateOf<String?>(null) }
+    var photosDialogTask by remember { mutableStateOf<Task?>(null) }
+    var pendingCameraTaskId by remember { mutableStateOf<String?>(null) }
+    var pendingCameraOutputUri by remember { mutableStateOf<Uri?>(null) }
+    var createStepGoal by remember { mutableStateOf<Task?>(null) }
+    var createStepTitle by remember { mutableStateOf("") }
     LaunchedEffect(initialTaskId) {
         val id = initialTaskId?.takeIf { it.isNotBlank() } ?: return@LaunchedEffect
         highlightedTaskId = id
@@ -419,6 +441,75 @@ fun BoardScreen(
     var boardNavStack by remember(boardId) { mutableStateOf(listOf(boardId)) }
     val board = state.boards.find { it.id == activeBoardId } ?: state.boards.find { it.id == boardId } ?: state.boards.firstOrNull()
     val currentBoardId = board?.id ?: activeBoardId
+
+    val takePictureLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { success ->
+        val taskId = pendingCameraTaskId
+        val uri = pendingCameraOutputUri
+        pendingCameraTaskId = null
+        pendingCameraOutputUri = null
+        if (success && taskId != null && uri != null) {
+            val projectId = board?.projectId.orEmpty()
+            viewModel.addTaskPhoto(taskId, projectId, uri) { err ->
+                when (err) {
+                    "limit" -> Toast.makeText(context, s.taskPhotosLimit, Toast.LENGTH_SHORT).show()
+                    "error" -> Toast.makeText(context, s.voiceError, Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    fun launchCameraCapture() {
+        try {
+            val photoFile = File(context.cacheDir, "task_photo_${System.currentTimeMillis()}.jpg")
+            val uri = FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                photoFile
+            )
+            pendingCameraOutputUri = uri
+            takePictureLauncher.launch(uri)
+        } catch (_: Exception) {
+            pendingCameraTaskId = null
+            pendingCameraOutputUri = null
+            Toast.makeText(context, s.voiceError, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            launchCameraCapture()
+        } else {
+            pendingCameraTaskId = null
+            Toast.makeText(context, s.cameraPermissionNeeded, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun requestTakePhoto(task: Task) {
+        if (!Entitlements.has(kairosPrefs, ProFeature.TaskPhotos)) {
+            Toast.makeText(context, s.proFeatureLocked, Toast.LENGTH_SHORT).show()
+            return
+        }
+        val count = state.taskAttachments.count { it.taskId == task.id }
+        if (count >= TaskAttachment.MAX_PER_TASK) {
+            Toast.makeText(context, s.taskPhotosLimit, Toast.LENGTH_SHORT).show()
+            return
+        }
+        pendingCameraTaskId = task.id
+        val granted = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.CAMERA
+        ) == PackageManager.PERMISSION_GRANTED
+        if (granted) {
+            launchCameraCapture()
+        } else {
+            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+        }
+    }
+
     val columns = remember(state.columns, currentBoardId) {
         state.columns.filter { it.boardId == currentBoardId }.sortedBy { it.position }
     }
@@ -634,6 +725,74 @@ fun BoardScreen(
         linkFocusAnchorId = null
     }
 
+    fun clearLinkPickParent() {
+        linkPickParentFor = null
+        linkPickPendingParentId = null
+    }
+
+    /** Goals and all descendants via task links (within [projectLinkCandidates]). */
+    val linkPickCandidateIds = remember(
+        linkPickParentFor?.id,
+        projectLinkCandidates,
+        state.taskLinks
+    ) {
+        val childId = linkPickParentFor?.id ?: return@remember emptySet()
+        val goals = projectLinkCandidates.filter { it.isGoal }.map { it.id }
+        if (goals.isEmpty()) return@remember emptySet()
+        val childrenMap = TaskLinkGraph.childrenOf(state.taskLinks)
+        val ids = goals.toMutableSet()
+        val queue = ArrayDeque(goals)
+        while (queue.isNotEmpty()) {
+            val id = queue.removeFirst()
+            childrenMap[id].orEmpty().forEach { child ->
+                if (ids.add(child)) queue.add(child)
+            }
+        }
+        ids - childId
+    }
+
+    fun startLinkPickParent(task: Task) {
+        clearLinkFocus()
+        linkPickPendingParentId = null
+        linkPickParentFor = task
+    }
+
+    val linkPickAlreadyParentIds = remember(linkPickParentFor?.id, state.taskLinks) {
+        val childId = linkPickParentFor?.id ?: return@remember emptySet()
+        state.taskLinks.filter { it.childId == childId }.mapTo(mutableSetOf()) { it.parentId }
+    }
+
+    fun selectLinkPickCandidate(parentCandidate: Task) {
+        val child = linkPickParentFor ?: return
+        if (parentCandidate.id == child.id) return
+        linkPickPendingParentId =
+            if (linkPickPendingParentId == parentCandidate.id) null else parentCandidate.id
+    }
+
+    fun confirmLinkPickParent() {
+        val child = linkPickParentFor ?: return
+        val parentId = linkPickPendingParentId ?: run {
+            Toast.makeText(context, s.linkPickSelectFirst, Toast.LENGTH_SHORT).show()
+            return
+        }
+        val parentCandidate = state.tasks.find { it.id == parentId } ?: return
+        val already = state.taskLinks.any {
+            it.parentId == parentCandidate.id && it.childId == child.id
+        }
+        if (already) {
+            viewModel.removeTaskLink(parentCandidate.id, child.id)
+            Toast.makeText(context, s.linkParentUnlinked(parentCandidate.title), Toast.LENGTH_SHORT).show()
+        } else {
+            val ok = viewModel.addTaskLink(parentCandidate.id, child.id)
+            if (!ok) {
+                Toast.makeText(context, s.taskLinkCycleRejected, Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(context, s.linkParentLinked(parentCandidate.title), Toast.LENGTH_SHORT).show()
+            }
+        }
+        linkPickPendingParentId = null
+    }
+
     fun openBoardAtHub(targetBoardId: String, targetColumnId: String? = null) {
         val targetBoard = state.boards.find { it.id == targetBoardId }
         if (targetBoard != null && KanbanNames.isEisenhowerBoard(targetBoard.name)) {
@@ -649,6 +808,7 @@ fun BoardScreen(
 
     BackHandler {
         when {
+            linkPickParentFor != null -> clearLinkPickParent()
             linkFocusIds.isNotEmpty() -> clearLinkFocus()
             boardSearchOpen -> {
                 boardSearchOpen = false
@@ -683,6 +843,7 @@ fun BoardScreen(
     var newTaskParentIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var newTaskChildIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var newTaskLinkPickMode by remember { mutableStateOf<String?>(null) } // "parent" | "child"
+    var newTaskShowAdvancedLinks by remember { mutableStateOf(false) }
     var showNewTaskDatePicker by remember { mutableStateOf(false) }
     val newDatePickerState = rememberDatePickerState()
     
@@ -701,6 +862,7 @@ fun BoardScreen(
     var editTaskComplexity by remember { mutableStateOf<Int?>(null) }
     var editTaskEstimatedMinutes by remember { mutableStateOf<Int?>(null) }
     var editTaskReminderMinutes by remember { mutableStateOf<Int?>(null) }
+    var editTaskDescription by remember { mutableStateOf("") }
     var showEditTaskDatePicker by remember { mutableStateOf(false) }
     val editDatePickerState = rememberDatePickerState()
     var qualityDialogTask by remember { mutableStateOf<Task?>(null) }
@@ -1355,6 +1517,7 @@ fun BoardScreen(
         newTaskParentIds = emptySet()
         newTaskChildIds = emptySet()
         newTaskLinkPickMode = null
+        newTaskShowAdvancedLinks = false
     }
 
     fun submitNewTask() {
@@ -1515,16 +1678,7 @@ fun BoardScreen(
                         color = MaterialTheme.colorScheme.onBackground,
                         modifier = Modifier
                             .weight(1f)
-                            .pointerInput(Unit) {
-                                detectTapGestures(
-                                    onDoubleTap = { onBack() }
-                                )
-                            }
-                            .basicMarquee(
-                                iterations = Int.MAX_VALUE,
-                                initialDelayMillis = 1200,
-                                delayMillis = 1500
-                            )
+                            .clickable { onBack() }
                     )
                     IconButton(
                         onClick = {
@@ -1748,7 +1902,7 @@ fun BoardScreen(
                 } // if peekProgress
         },
         floatingActionButton = {
-            if (draggedTask == null && columns.isNotEmpty()) {
+            if (draggedTask == null && columns.isNotEmpty() && linkPickParentFor == null) {
                 Column(
                     horizontalAlignment = Alignment.End,
                     verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -1789,7 +1943,7 @@ fun BoardScreen(
         containerColor = Color.Transparent,
         contentWindowInsets = WindowInsets.safeDrawing
     ) { padding ->
-        val linkFocusActive = linkFocusIds.isNotEmpty()
+        val linkFocusActive = linkFocusIds.isNotEmpty() || linkPickParentFor != null
         val boardBg by animateColorAsState(
             targetValue = if (linkFocusActive) LinkFocusChrome.board else MaterialTheme.colorScheme.background,
             animationSpec = tween(220),
@@ -1828,10 +1982,11 @@ fun BoardScreen(
                 modifier = Modifier.fillMaxSize()
             ) {
                 AnimatedVisibility(
-                    visible = linkFocusIds.isNotEmpty(),
+                    visible = linkPickParentFor != null || linkFocusIds.isNotEmpty(),
                     enter = expandVertically(animationSpec = tween(120)) + fadeIn(animationSpec = tween(100)),
                     exit = shrinkVertically(animationSpec = tween(90)) + fadeOut(animationSpec = tween(70))
                 ) {
+                    val pickFor = linkPickParentFor
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1848,15 +2003,57 @@ fun BoardScreen(
                             tint = LinkFocusChrome.bannerContent,
                             modifier = Modifier.size(20.dp)
                         )
-                        Text(
-                            text = s.linkFocusMode,
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.SemiBold,
-                            color = LinkFocusChrome.bannerContent,
-                            modifier = Modifier.weight(1f)
-                        )
-                        TextButton(onClick = { clearLinkFocus() }) {
-                            Text(s.linkFocusExit, color = LinkFocusChrome.bannerContent)
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = if (pickFor != null) {
+                                    s.linkPickParentMode(pickFor.title)
+                                } else {
+                                    s.linkFocusMode
+                                },
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.SemiBold,
+                                color = LinkFocusChrome.bannerContent,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            if (pickFor != null) {
+                                Text(
+                                    text = s.linkPickParentHint,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = LinkFocusChrome.bannerContent.copy(alpha = 0.9f),
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                        if (pickFor != null) {
+                            IconButton(
+                                onClick = { confirmLinkPickParent() },
+                                enabled = linkPickPendingParentId != null
+                            ) {
+                                Icon(
+                                    Icons.Default.Check,
+                                    contentDescription = s.linkPickConfirm,
+                                    tint = if (linkPickPendingParentId != null) {
+                                        LinkFocusChrome.bannerContent
+                                    } else {
+                                        LinkFocusChrome.bannerContent.copy(alpha = 0.35f)
+                                    }
+                                )
+                            }
+                        }
+                        TextButton(
+                            onClick = {
+                                if (pickFor != null) clearLinkPickParent()
+                                else clearLinkFocus()
+                            },
+                            contentPadding = PaddingValues(horizontal = 8.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = s.linkFocusExit,
+                                tint = LinkFocusChrome.bannerContent
+                            )
                         }
                     }
                 }
@@ -2149,7 +2346,8 @@ fun BoardScreen(
                         val index = virtualToReal(virtual)
                         val column = columns[index]
                         val columnTasks = tasksInHub(column, index)
-                        val useLiteCards = draggedTask == null &&
+                        val useLiteCards = linkPickParentFor == null &&
+                            draggedTask == null &&
                             (hubPagingActive || virtual != hubSettledVirtual)
 
                         Box(
@@ -2178,17 +2376,28 @@ fun BoardScreen(
                             activeInProgressTaskId = inProgressTaskId,
                             highlightedTaskId = highlightedTaskId,
                             linkFocusIds = linkFocusIds,
+                            linkPickFilterIds = if (linkPickParentFor != null) linkPickCandidateIds else null,
+                            linkPickAlreadyParentIds = if (linkPickParentFor != null) {
+                                linkPickAlreadyParentIds
+                            } else {
+                                emptySet()
+                            },
                             linkNeighborsByTaskId = linkNeighborsByTaskId,
                             onLinkChipClick = { taskId ->
-                                if (linkFocusAnchorId == taskId) {
-                                    clearLinkFocus()
-                                } else {
-                                    val related = TaskLinkGraph.relatedIds(taskId, state.taskLinks)
-                                    linkFocusAnchorId = taskId
-                                    linkFocusIds = related + taskId
+                                if (linkPickParentFor == null) {
+                                    if (linkFocusAnchorId == taskId) {
+                                        clearLinkFocus()
+                                    } else {
+                                        val related = TaskLinkGraph.relatedIds(taskId, state.taskLinks)
+                                        linkFocusAnchorId = taskId
+                                        linkFocusIds = related + taskId
+                                    }
                                 }
                             },
-                            onOpenTaskLinks = { task -> linksDialogTask = task },
+                            onOpenTaskLinks = { task -> startLinkPickParent(task) },
+                            onOpenGoalSteps = { task -> linksDialogTask = task },
+                            onLinkPickParent = { candidate -> selectLinkPickCandidate(candidate) },
+                            linkPickPendingParentId = linkPickPendingParentId,
                             onToggleInProgress = { task ->
                                 val next = if (inProgressTaskId == task.id) null else task.id
                                 inProgressTaskId = next
@@ -2240,6 +2449,7 @@ fun BoardScreen(
                             onEditTaskClick = { task ->
                                 taskToEdit = task
                                 editTaskTitle = task.title
+                                editTaskDescription = task.description
                                 editTaskDueDate = task.dueDate
                                 editDatePickerState.selectedDateMillis = task.dueDate?.let { localMillisToUtcPicker(it) }
                                 editTaskShowEisenhower = task.showEisenhowerButtons || task.eisenhowerQuadrant != null
@@ -2253,6 +2463,12 @@ fun BoardScreen(
                                 deleteTaskWithUndo(taskId)
                             },
                             onCommentClick = { task -> taskForComments = task },
+                            onOpenPhotos = { task -> photosDialogTask = task },
+                            onTakePhoto = { task -> requestTakePhoto(task) },
+                            onCreateStep = { goal ->
+                                createStepGoal = goal
+                                createStepTitle = ""
+                            },
                             onMoveTaskClick = { task ->
                                 taskForMove = task
                                 taskForMoveHubId = column.id
@@ -2632,16 +2848,11 @@ fun BoardScreen(
 
                             DialogSectionDivider()
                             Text(
-                                s.manageTaskLinks,
+                                s.taskParents,
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.SemiBold
                             )
                             Spacer(modifier = Modifier.height(6.dp))
-                            Text(
-                                s.taskParents,
-                                style = MaterialTheme.typography.labelLarge,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
                             newTaskParentIds.forEach { parentId ->
                                 val title = tasksById[parentId]?.title ?: parentId
                                 Row(
@@ -2649,7 +2860,7 @@ fun BoardScreen(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Text(
-                                        text = s.parentChip(title),
+                                        text = s.linkedToGoal(title),
                                         style = MaterialTheme.typography.bodyMedium,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
@@ -2663,36 +2874,51 @@ fun BoardScreen(
                                 }
                             }
                             TextButton(onClick = { newTaskLinkPickMode = "parent" }) {
-                                Text(s.addParentLink)
+                                Icon(Icons.Default.AccountTree, contentDescription = null)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(s.addParentLink, maxLines = 1)
                             }
-                            DialogSectionDivider()
-                            Text(
-                                s.taskChildren,
-                                style = MaterialTheme.typography.labelLarge,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            newTaskChildIds.forEach { childId ->
-                                val title = tasksById[childId]?.title ?: childId
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = s.childrenChipLabel(title),
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    IconButton(onClick = {
-                                        newTaskChildIds = newTaskChildIds - childId
-                                    }) {
-                                        Icon(Icons.Default.Close, contentDescription = null)
+                            TextButton(onClick = { newTaskShowAdvancedLinks = !newTaskShowAdvancedLinks }) {
+                                Icon(
+                                    if (newTaskShowAdvancedLinks) Icons.Default.KeyboardArrowUp
+                                    else Icons.Default.KeyboardArrowDown,
+                                    contentDescription = null
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(s.linkAdvanced, maxLines = 1)
+                            }
+                            if (newTaskShowAdvancedLinks) {
+                                DialogSectionDivider()
+                                Text(
+                                    s.taskChildren,
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                newTaskChildIds.forEach { childId ->
+                                    val title = tasksById[childId]?.title ?: childId
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = s.childrenChipLabel(title),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        IconButton(onClick = {
+                                            newTaskChildIds = newTaskChildIds - childId
+                                        }) {
+                                            Icon(Icons.Default.Close, contentDescription = null)
+                                        }
                                     }
                                 }
-                            }
-                            TextButton(onClick = { newTaskLinkPickMode = "child" }) {
-                                Text(s.addChildLink)
+                                TextButton(onClick = { newTaskLinkPickMode = "child" }) {
+                                    Icon(Icons.Default.Add, contentDescription = null)
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(s.addChildLink, maxLines = 1)
+                                }
                             }
                         }
                     },
@@ -2721,7 +2947,8 @@ fun BoardScreen(
                     projectLinkCandidates.filter { candidate ->
                         when (pickMode) {
                             "parent" -> {
-                                candidate.id !in newTaskParentIds &&
+                                candidate.isGoal &&
+                                    candidate.id !in newTaskParentIds &&
                                     candidate.id !in newTaskChildIds &&
                                     newTaskChildIds.none {
                                         TaskLinkGraph.wouldCreateCycle(state.taskLinks, candidate.id, it)
@@ -2741,6 +2968,7 @@ fun BoardScreen(
                     title = if (pickMode == "parent") s.pickParentTask else s.pickChildTask,
                     candidates = candidates,
                     columns = projectColumns,
+                    emptyMessage = if (pickMode == "parent") s.noGoalsToLink else s.noTasksToLink,
                     onPick = { candidate ->
                         if (pickMode == "parent") {
                             newTaskParentIds = newTaskParentIds + candidate.id
@@ -2858,6 +3086,7 @@ fun BoardScreen(
                     if (editTaskTitle.isNotBlank()) {
                         val updatedTask = taskToEdit!!.copy(
                             title = editTaskTitle,
+                            description = editTaskDescription,
                             categoryId = null,
                             dueDate = editTaskDueDate,
                             showEisenhowerButtons = editTaskShowEisenhower,
@@ -2899,6 +3128,16 @@ fun BoardScreen(
                                         if (enterAddsTask) saveEditedTask()
                                     }
                                 )
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            OutlinedTextField(
+                                value = editTaskDescription,
+                                onValueChange = { editTaskDescription = it },
+                                label = { Text(s.taskDescription) },
+                                placeholder = { Text(s.taskDescriptionHint) },
+                                modifier = Modifier.fillMaxWidth(),
+                                minLines = 2,
+                                maxLines = 5
                             )
                             Spacer(modifier = Modifier.height(8.dp))
                             DialogSectionDivider()
@@ -3133,9 +3372,104 @@ fun BoardScreen(
                         ok
                     },
                     onRemoveLink = { parentId, childId -> viewModel.removeTaskLink(parentId, childId) },
+                    onCreateStep = if (linked.isGoal) {
+                        {
+                            createStepGoal = linked
+                            createStepTitle = ""
+                        }
+                    } else null,
                     onDismiss = { linksDialogTask = null },
                     onCycleRejected = {
                         Toast.makeText(context, s.taskLinkCycleRejected, Toast.LENGTH_SHORT).show()
+                    }
+                )
+            }
+
+            photosDialogTask?.let { photoTask ->
+                val projectId = board?.projectId.orEmpty()
+                val attachments = state.taskAttachments.filter { it.taskId == photoTask.id }
+                TaskPhotosDialog(
+                    task = photoTask,
+                    attachments = attachments,
+                    resolveAbsolutePath = { rel -> viewModel.attachmentAbsolutePath(rel) },
+                    canEdit = Entitlements.has(kairosPrefs, ProFeature.TaskPhotos),
+                    onAddPhoto = { uri ->
+                        viewModel.addTaskPhoto(photoTask.id, projectId, uri) { err ->
+                            when (err) {
+                                "limit" -> Toast.makeText(context, s.taskPhotosLimit, Toast.LENGTH_SHORT).show()
+                                "error" -> Toast.makeText(context, s.voiceError, Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    },
+                    onTakePhoto = { requestTakePhoto(photoTask) },
+                    onDeletePhoto = { id -> viewModel.deleteTaskPhoto(id) },
+                    onProRequired = {
+                        Toast.makeText(context, s.proFeatureLocked, Toast.LENGTH_SHORT).show()
+                    },
+                    onDismiss = { photosDialogTask = null }
+                )
+            }
+
+            createStepGoal?.let { goal ->
+                AlertDialog(
+                    onDismissRequest = {
+                        createStepGoal = null
+                        createStepTitle = ""
+                    },
+                    title = { Text(s.createStepTitle) },
+                    text = {
+                        Column {
+                            Text(
+                                text = goal.title,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            OutlinedTextField(
+                                value = createStepTitle,
+                                onValueChange = { createStepTitle = it },
+                                label = { Text(s.createStepHint) },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true
+                            )
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                val title = createStepTitle.trim()
+                                if (title.isBlank()) return@TextButton
+                                val columnId = primaryHubId
+                                    ?: columns.find { col ->
+                                        val t = col.title.trim().lowercase()
+                                        t == "сделать" || t == "do" || t == "to do" || t == "todo" ||
+                                            t == "сегодня" || t == "today"
+                                    }?.id
+                                    ?: columns.firstOrNull()?.id
+                                if (columnId == null) {
+                                    Toast.makeText(context, s.voiceNoDestination, Toast.LENGTH_SHORT).show()
+                                    return@TextButton
+                                }
+                                viewModel.addTask(
+                                    title = title,
+                                    columnId = columnId,
+                                    categoryId = null,
+                                    dueDate = null,
+                                    currentTasks = state.tasks.filter { it.columnId == columnId },
+                                    parentIds = listOf(goal.id)
+                                )
+                                createStepGoal = null
+                                createStepTitle = ""
+                            }
+                        ) { Text(s.add) }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = {
+                            createStepGoal = null
+                            createStepTitle = ""
+                        }) { Text(s.cancel) }
                     }
                 )
             }
@@ -3424,9 +3758,18 @@ private fun ColumnItem(
     activeInProgressTaskId: String? = null,
     highlightedTaskId: String? = null,
     linkFocusIds: Set<String> = emptySet(),
+    /** When non-null, only these task ids are shown (link-pick-parent mode). */
+    linkPickFilterIds: Set<String>? = null,
+    linkPickAlreadyParentIds: Set<String> = emptySet(),
+    linkPickPendingParentId: String? = null,
     linkNeighborsByTaskId: Map<String, List<TaskLinkNeighbor>> = emptyMap(),
     onLinkChipClick: (String) -> Unit = {},
     onOpenTaskLinks: (Task) -> Unit = {},
+    onOpenPhotos: (Task) -> Unit = {},
+    onTakePhoto: (Task) -> Unit = {},
+    onCreateStep: (Task) -> Unit = {},
+    onOpenGoalSteps: (Task) -> Unit = {},
+    onLinkPickParent: (Task) -> Unit = {},
     onToggleInProgress: (Task) -> Unit = {},
     onColumnPositioned: (androidx.compose.ui.geometry.Rect) -> Unit,
     onTaskPositioned: (Task, androidx.compose.ui.geometry.Rect) -> Unit,
@@ -3483,37 +3826,59 @@ private fun ColumnItem(
     val insertIndex = dropInsertIndex
     var showHiddenTasks by remember { mutableStateOf(false) }
     val hiddenCount = remember(tasks) { tasks.count { it.isHidden } }
-    val activeTasks = remember(tasks, showHiddenTasks, linkFocusIds) {
+    val activeTasks = remember(tasks, showHiddenTasks, linkFocusIds, linkPickFilterIds) {
         tasks.filter {
             !it.isBoardArchived &&
                 !it.isCompleted &&
                 !it.isNotDone &&
                 (showHiddenTasks || !it.isHidden) &&
-                (linkFocusIds.isEmpty() || it.id in linkFocusIds)
+                (linkFocusIds.isEmpty() || it.id in linkFocusIds) &&
+                (linkPickFilterIds == null || it.id in linkPickFilterIds)
         }
     }
     val visibleActiveTasks = activeTasks
-    val notDoneTasks = remember(tasks, showHiddenTasks, linkFocusIds) {
+    val notDoneTasks = remember(tasks, showHiddenTasks, linkFocusIds, linkPickFilterIds) {
         tasks.filter {
             !it.isBoardArchived &&
                 it.isNotDone &&
                 (showHiddenTasks || !it.isHidden) &&
-                (linkFocusIds.isEmpty() || it.id in linkFocusIds)
+                (linkFocusIds.isEmpty() || it.id in linkFocusIds) &&
+                (linkPickFilterIds == null || it.id in linkPickFilterIds)
         }
     }
-    val completedTasks = remember(tasks, showHiddenTasks, linkFocusIds) {
+    val completedTasks = remember(tasks, showHiddenTasks, linkFocusIds, linkPickFilterIds) {
         tasks.filter {
             !it.isBoardArchived &&
                 it.isCompleted &&
                 (showHiddenTasks || !it.isHidden) &&
-                (linkFocusIds.isEmpty() || it.id in linkFocusIds)
+                (linkFocusIds.isEmpty() || it.id in linkFocusIds) &&
+                (linkPickFilterIds == null || it.id in linkPickFilterIds)
         }.sortedByDescending { it.completedAt ?: 0L }
     }
     var showCompleted by remember { mutableStateOf(false) }
     var showNotDone by remember { mutableStateOf(false) }
+    val groupedHubTaskIds = remember(visibleActiveTasks, notDoneTasks, completedTasks) {
+        (visibleActiveTasks + notDoneTasks + completedTasks)
+            .filter { !it.hubGroupId.isNullOrBlank() }
+            .map { it.id }
+            .distinct()
+    }
+    val hasHubGroups = groupedHubTaskIds.isNotEmpty()
+    LaunchedEffect(linkPickFilterIds) {
+        if (linkPickFilterIds != null) {
+            showCompleted = true
+            showNotDone = true
+        }
+    }
     var showClearConfirmDialog by remember { mutableStateOf(false) }
     var showClearNotDoneDialog by remember { mutableStateOf(false) }
     var completedHeaderMenuOpen by remember { mutableStateOf(false) }
+    var selectMode by remember { mutableStateOf(false) }
+    var selectedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    BackHandler(enabled = selectMode) {
+        selectMode = false
+        selectedIds = emptySet()
+    }
     var notDoneHeaderMenuOpen by remember { mutableStateOf(false) }
 
     val density = LocalDensity.current
@@ -3601,7 +3966,7 @@ private fun ColumnItem(
         Color(0xFF10B981)  // Emerald
     )
     val hubColor = hubColors[columnIndex % hubColors.size]
-    val linkFocusActive = linkFocusIds.isNotEmpty()
+    val linkFocusActive = linkFocusIds.isNotEmpty() || linkPickFilterIds != null
     val hubBg by animateColorAsState(
         targetValue = when {
             isDropTarget -> MaterialTheme.colorScheme.primary.copy(alpha = 0.10f)
@@ -3749,6 +4114,18 @@ private fun ColumnItem(
                     }
                 }
             }
+            if (hasHubGroups) {
+                IconButton(
+                    onClick = { viewModel.ungroupHubTasks(groupedHubTaskIds) },
+                    modifier = Modifier.size(AlignedMoreButtonSize)
+                ) {
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = s.resetHubGroups,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
             AlignedMoreMenuButton(
                 expanded = hubMenuExpanded,
                 onExpandedChange = { hubMenuExpanded = it },
@@ -3870,7 +4247,7 @@ private fun ColumnItem(
             state = hubListState,
             userScrollEnabled = !useLiteCards && draggedTaskId == null,
             modifier = Modifier
-                .fillMaxHeight()
+                .weight(1f)
                 .nestedScroll(chromePullConnection)
                 .then(
                     if (reportPositions) {
@@ -3890,7 +4267,7 @@ private fun ColumnItem(
                     }
                 ),
             contentPadding = PaddingValues(bottom = 88.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            verticalArrangement = Arrangement.spacedBy(0.dp)
         ) {
             // Same item count for lite and full — peek limit caused a vertical jump on settle.
             val listTasks = visibleActiveTasks
@@ -3903,7 +4280,11 @@ private fun ColumnItem(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = if (linkFocusIds.isNotEmpty()) s.linkFocusEmptyHub else s.noTasks,
+                            text = when {
+                                linkPickFilterIds != null -> s.linkPickEmpty
+                                linkFocusIds.isNotEmpty() -> s.linkFocusEmptyHub
+                                else -> s.noTasks
+                            },
                             style = MaterialTheme.typography.bodyLarge,
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
                         )
@@ -3911,74 +4292,152 @@ private fun ColumnItem(
                 }
             } else {
                 itemsIndexed(listTasks, key = { _, task -> task.id }) { index, task ->
-                    if (useLiteCards) {
-                        LiteTaskRow(
-                            title = task.title,
-                            eisenhowerQuadrant = task.eisenhowerQuadrant.takeIf { !task.isCompleted },
-                            isOverdue = !task.isCompleted && task.dueDate != null && task.dueDate.isOverdueDate(),
-                            isInProgress = activeInProgressTaskId == task.id,
-                            isCompleted = false,
-                            isGoal = task.isGoal,
-                            isRecurring = !task.recurringTemplateId.isNullOrBlank(),
-                            hasDueDate = task.dueDate != null,
-                            hasRelated = relatedBoardsByTaskId[task.id].orEmpty().isNotEmpty(),
-                            hasTaskLinks = linkNeighborsByTaskId[task.id].orEmpty().isNotEmpty()
-                        )
-                    } else {
-                    val taskCommentsCount = commentCountByTaskId[task.id] ?: 0
-                    val relatedBoards = relatedBoardsByTaskId[task.id].orEmpty()
+                    val groupId = task.hubGroupId
+                    val groupSize = if (groupId != null) {
+                        listTasks.count { it.hubGroupId == groupId }
+                    } else 0
+                    val inGroup = groupId != null && groupSize >= 2
+                    val isGroupStart = inGroup && listTasks.getOrNull(index - 1)?.hubGroupId != groupId
+                    val isGroupEnd = inGroup && listTasks.getOrNull(index + 1)?.hubGroupId != groupId
                     val filteredIndex = if (draggedTaskId == null) index
                     else visibleActiveTasks.take(index).count { it.id != draggedTaskId }
 
-                    androidx.compose.foundation.layout.Column(modifier = Modifier.fillMaxWidth()) {
-                        if (insertIndex != null && task.id != draggedTaskId && insertIndex == filteredIndex) {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        if (!useLiteCards && insertIndex != null && task.id != draggedTaskId && insertIndex == filteredIndex) {
                             DropInsertSlot()
                             Spacer(modifier = Modifier.height(12.dp))
                         }
-                        TaskCard(
-                            task = task,
-                            viewModel = viewModel,
-                            commentsCount = taskCommentsCount,
-                            isInProgress = activeInProgressTaskId == task.id,
-                            isHighlighted = highlightedTaskId == task.id ||
-                                (linkFocusIds.isNotEmpty() && task.id in linkFocusIds),
-                            isAnyTaskInProgress = activeInProgressTaskId != null,
-                            isDragging = draggedTaskId == task.id,
-                            relatedBoards = relatedBoards,
-                            linkNeighbors = linkNeighborsByTaskId[task.id].orEmpty(),
-                            onLinkChipClick = { onLinkChipClick(task.id) },
-                            onOpenTaskLinks = { onOpenTaskLinks(task) },
-                            onOpenRelatedBoard = onOpenBoard,
-                            onRemoveFromBoard = if (relatedBoards.isNotEmpty()) {
-                                {
-                                    viewModel.removeTaskFromBoard(task, currentBoardId)
-                                    Toast.makeText(context, s.taskRemovedFromBoard, Toast.LENGTH_SHORT).show()
-                                }
-                            } else null,
-                            onSetQuadrant = { q ->
-                                viewModel.setTaskQuadrant(task, q)
-                                val msg = if (q != null) {
-                                    s.addedToMatrix(q)
+                        if (isGroupStart) {
+                            HorizontalDivider(
+                                thickness = 3.dp,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.88f)
+                            )
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = 4.dp, end = 0.dp, top = 6.dp, bottom = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = s.hubGroupLabel,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                // Per-group clear stays on settle only; hub header clears all.
+                                if (!useLiteCards) {
+                                    IconButton(
+                                        onClick = {
+                                            val ids = listTasks
+                                                .filter { it.hubGroupId == groupId }
+                                                .map { it.id }
+                                            viewModel.ungroupHubTasks(ids)
+                                        },
+                                        modifier = Modifier.size(36.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Close,
+                                            contentDescription = s.ungroupTasks,
+                                            tint = MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
                                 } else {
-                                    s.removedFromMatrix
+                                    Spacer(modifier = Modifier.size(36.dp))
                                 }
-                                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
-                            },
-                            onToggleInProgress = { onToggleInProgress(task) },
-                            onCommentClick = { onCommentClick(task) },
-                            onMoveClick = { onMoveTaskClick(task) },
-                            reportPosition = reportPositions,
-                            onPositioned = { rect -> onTaskPositioned(task, rect) },
-                            onDragStart = { offset -> onDragStart(task, offset) },
-                            onDrag = onDrag,
-                            onDragEnd = onDragEnd,
-                            onEditClick = { onEditTaskClick(task) },
-                            onCriteriaClick = { onOpenTaskCriteria(task) },
-                            onDeleteClick = { onDeleteTaskClick(task.id) },
-                            onToggleCompleted = { onToggleCompleted(task) },
-                            actionsRevealToken = actionsRevealEpoch.get()
+                            }
+                        }
+                        if (useLiteCards) {
+                            LiteTaskRow(
+                                title = task.title,
+                                eisenhowerQuadrant = task.eisenhowerQuadrant.takeIf { !task.isCompleted },
+                                isOverdue = !task.isCompleted && task.dueDate != null && task.dueDate.isOverdueDate(),
+                                isInProgress = activeInProgressTaskId == task.id,
+                                isCompleted = false,
+                                isGoal = task.isGoal,
+                                isRecurring = !task.recurringTemplateId.isNullOrBlank(),
+                                hasDueDate = task.dueDate != null,
+                                hasRelated = relatedBoardsByTaskId[task.id].orEmpty().isNotEmpty(),
+                                hasTaskLinks = linkNeighborsByTaskId[task.id].orEmpty().isNotEmpty()
+                            )
+                        } else {
+                            val taskCommentsCount = commentCountByTaskId[task.id] ?: 0
+                            val relatedBoards = relatedBoardsByTaskId[task.id].orEmpty()
+                            TaskCard(
+                                task = task,
+                                viewModel = viewModel,
+                                commentsCount = taskCommentsCount,
+                                isInProgress = activeInProgressTaskId == task.id,
+                                isHighlighted = highlightedTaskId == task.id ||
+                                    (linkFocusIds.isNotEmpty() && task.id in linkFocusIds) ||
+                                    (task.id in linkPickAlreadyParentIds),
+                                isAnyTaskInProgress = activeInProgressTaskId != null,
+                                isDragging = draggedTaskId == task.id,
+                                relatedBoards = relatedBoards,
+                                linkNeighbors = linkNeighborsByTaskId[task.id].orEmpty(),
+                                onLinkChipClick = { onLinkChipClick(task.id) },
+                                onOpenTaskLinks = { onOpenTaskLinks(task) },
+                                onOpenPhotos = { onOpenPhotos(task) },
+                                onTakePhoto = { onTakePhoto(task) },
+                                onCreateStep = { onCreateStep(task) },
+                                onOpenGoalSteps = { onOpenGoalSteps(task) },
+                                linkPickMode = linkPickFilterIds != null,
+                                isLinkPickParent = task.id in linkPickAlreadyParentIds,
+                                isLinkPickPending = task.id == linkPickPendingParentId,
+                                onLinkPick = { onLinkPickParent(task) },
+                                selectionMode = selectMode,
+                                isSelected = task.id in selectedIds,
+                                onToggleSelected = {
+                                    selectedIds = if (task.id in selectedIds) selectedIds - task.id
+                                    else selectedIds + task.id
+                                },
+                                onEnterSelection = {
+                                    selectMode = true
+                                    selectedIds = setOf(task.id)
+                                },
+                                onOpenRelatedBoard = onOpenBoard,
+                                onRemoveFromBoard = if (relatedBoards.isNotEmpty()) {
+                                    {
+                                        viewModel.removeTaskFromBoard(task, currentBoardId)
+                                        Toast.makeText(context, s.taskRemovedFromBoard, Toast.LENGTH_SHORT).show()
+                                    }
+                                } else null,
+                                onSetQuadrant = { q ->
+                                    viewModel.setTaskQuadrant(task, q)
+                                    val msg = if (q != null) {
+                                        s.addedToMatrix(q)
+                                    } else {
+                                        s.removedFromMatrix
+                                    }
+                                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                                },
+                                onToggleInProgress = { onToggleInProgress(task) },
+                                onCommentClick = { onCommentClick(task) },
+                                onMoveClick = { onMoveTaskClick(task) },
+                                reportPosition = reportPositions,
+                                onPositioned = { rect -> onTaskPositioned(task, rect) },
+                                onDragStart = { offset -> onDragStart(task, offset) },
+                                onDrag = onDrag,
+                                onDragEnd = onDragEnd,
+                                onEditClick = { onEditTaskClick(task) },
+                                onCriteriaClick = { onOpenTaskCriteria(task) },
+                                onDeleteClick = { onDeleteTaskClick(task.id) },
+                                onToggleCompleted = { onToggleCompleted(task) },
+                                actionsRevealToken = actionsRevealEpoch.get()
+                            )
+                        }
+                        if (isGroupEnd) {
+                            HorizontalDivider(
+                                thickness = 3.dp,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.88f),
+                                modifier = Modifier.padding(top = 6.dp)
+                            )
+                        }
+                        Spacer(
+                            modifier = Modifier.height(
+                                if (inGroup && !isGroupEnd) 6.dp else 12.dp
+                            )
                         )
-                    }
                     }
                 }
                 if (!useLiteCards && insertIndex != null && insertIndex >= visibleActiveTasks.count { it.id != draggedTaskId }) {
@@ -4075,12 +4534,31 @@ private fun ColumnItem(
                                     viewModel = viewModel,
                                     commentsCount = taskCommentsCount,
                                     isInProgress = false,
-                                    isHighlighted = linkFocusIds.isNotEmpty() && task.id in linkFocusIds,
+                                    isHighlighted = (linkFocusIds.isNotEmpty() && task.id in linkFocusIds) ||
+                                        task.id in linkPickAlreadyParentIds,
                                     isAnyTaskInProgress = activeInProgressTaskId != null,
                                     relatedBoards = relatedBoards,
                                     linkNeighbors = linkNeighborsByTaskId[task.id].orEmpty(),
                                     onLinkChipClick = { onLinkChipClick(task.id) },
                                     onOpenTaskLinks = { onOpenTaskLinks(task) },
+                                    onOpenPhotos = { onOpenPhotos(task) },
+                                    onTakePhoto = { onTakePhoto(task) },
+                                    onCreateStep = { onCreateStep(task) },
+                                    onOpenGoalSteps = { onOpenGoalSteps(task) },
+                                    linkPickMode = linkPickFilterIds != null,
+                                    isLinkPickParent = task.id in linkPickAlreadyParentIds,
+                                    isLinkPickPending = task.id == linkPickPendingParentId,
+                                    onLinkPick = { onLinkPickParent(task) },
+                                    selectionMode = selectMode,
+                                    isSelected = task.id in selectedIds,
+                                    onToggleSelected = {
+                                        selectedIds = if (task.id in selectedIds) selectedIds - task.id
+                                        else selectedIds + task.id
+                                    },
+                                    onEnterSelection = {
+                                        selectMode = true
+                                        selectedIds = setOf(task.id)
+                                    },
                                     onOpenRelatedBoard = onOpenBoard,
                                     onSetQuadrant = { q ->
                                         viewModel.setTaskQuadrant(task, q)
@@ -4188,12 +4666,31 @@ private fun ColumnItem(
                                 viewModel = viewModel,
                                 commentsCount = taskCommentsCount,
                                 isInProgress = false,
-                                isHighlighted = linkFocusIds.isNotEmpty() && task.id in linkFocusIds,
+                                isHighlighted = (linkFocusIds.isNotEmpty() && task.id in linkFocusIds) ||
+                                    task.id in linkPickAlreadyParentIds,
                                 isAnyTaskInProgress = activeInProgressTaskId != null,
                                 relatedBoards = relatedBoards,
                                 linkNeighbors = linkNeighborsByTaskId[task.id].orEmpty(),
                                 onLinkChipClick = { onLinkChipClick(task.id) },
                                 onOpenTaskLinks = { onOpenTaskLinks(task) },
+                                onOpenPhotos = { onOpenPhotos(task) },
+                                onTakePhoto = { onTakePhoto(task) },
+                                onCreateStep = { onCreateStep(task) },
+                                onOpenGoalSteps = { onOpenGoalSteps(task) },
+                                linkPickMode = linkPickFilterIds != null,
+                                isLinkPickParent = task.id in linkPickAlreadyParentIds,
+                                isLinkPickPending = task.id == linkPickPendingParentId,
+                                onLinkPick = { onLinkPickParent(task) },
+                                selectionMode = selectMode,
+                                isSelected = task.id in selectedIds,
+                                onToggleSelected = {
+                                    selectedIds = if (task.id in selectedIds) selectedIds - task.id
+                                    else selectedIds + task.id
+                                },
+                                onEnterSelection = {
+                                    selectMode = true
+                                    selectedIds = setOf(task.id)
+                                },
                                 onOpenRelatedBoard = onOpenBoard,
                                 onSetQuadrant = { q ->
                                     viewModel.setTaskQuadrant(task, q)
@@ -4219,6 +4716,74 @@ private fun ColumnItem(
                             )
                         }
                     }
+                    }
+                }
+            }
+        }
+
+        if (selectMode) {
+            Surface(
+                tonalElevation = 3.dp,
+                shadowElevation = 4.dp,
+                color = MaterialTheme.colorScheme.surface,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        // Keep actions clear of the voice mic + add FABs on the trailing edge.
+                        .padding(start = 8.dp, end = 80.dp, top = 4.dp, bottom = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = s.selectedCount(selectedIds.size),
+                        style = MaterialTheme.typography.labelLarge,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(
+                        onClick = {
+                            selectMode = false
+                            selectedIds = emptySet()
+                        }
+                    ) {
+                        Icon(Icons.Default.Close, contentDescription = s.cancelSelection)
+                    }
+                    val canUngroup = selectedIds.any { id ->
+                        tasks.find { it.id == id }?.hubGroupId != null
+                    }
+                    if (canUngroup) {
+                        IconButton(
+                            onClick = {
+                                viewModel.ungroupHubTasks(selectedIds)
+                                selectMode = false
+                                selectedIds = emptySet()
+                            }
+                        ) {
+                            Icon(Icons.Default.Close, contentDescription = s.ungroupTasks)
+                        }
+                    }
+                    IconButton(
+                        onClick = {
+                            when {
+                                selectedIds.size < 2 -> {
+                                    Toast.makeText(context, s.groupNeedTwo, Toast.LENGTH_SHORT).show()
+                                }
+                                else -> {
+                                    val ok = viewModel.groupHubTasks(selectedIds)
+                                    if (!ok) {
+                                        Toast.makeText(context, s.groupNeedTwo, Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        selectMode = false
+                                        selectedIds = emptySet()
+                                    }
+                                }
+                            }
+                        }
+                    ) {
+                        Icon(Icons.Default.GridView, contentDescription = s.groupTasks)
                     }
                 }
             }
@@ -4298,6 +4863,18 @@ fun TaskCard(
     linkNeighbors: List<TaskLinkNeighbor> = emptyList(),
     onLinkChipClick: () -> Unit = {},
     onOpenTaskLinks: () -> Unit = {},
+    onOpenPhotos: () -> Unit = {},
+    onTakePhoto: () -> Unit = {},
+    onCreateStep: () -> Unit = {},
+    onOpenGoalSteps: () -> Unit = {},
+    linkPickMode: Boolean = false,
+    isLinkPickParent: Boolean = false,
+    isLinkPickPending: Boolean = false,
+    onLinkPick: () -> Unit = {},
+    selectionMode: Boolean = false,
+    isSelected: Boolean = false,
+    onToggleSelected: () -> Unit = {},
+    onEnterSelection: () -> Unit = {},
     onOpenRelatedBoard: (boardId: String, columnId: String) -> Unit = { _, _ -> },
     onRemoveFromBoard: (() -> Unit)? = null,
     onSetQuadrant: ((String?) -> Unit)? = null,
@@ -4319,6 +4896,7 @@ fun TaskCard(
     val context = LocalContext.current
     val s = LocalAppStrings.current
     val dateLocale = LocalAppLanguage.current.locale
+    val appState by viewModel.state.collectAsState()
 
     val toggleCompleted = {
         onToggleCompleted?.invoke() ?: viewModel.toggleTaskCompletion(task)
@@ -4332,6 +4910,8 @@ fun TaskCard(
     }
 
     var moreMenuExpanded by remember(task.id) { mutableStateOf(false) }
+    var titleExpanded by remember(task.id) { mutableStateOf(false) }
+    var titleOverflows by remember(task.id, task.title) { mutableStateOf(false) }
     // token > 0: start fully off-screen (clipped), then slide R→L. token == 0: already settled, show.
     val actionsReveal = remember(task.id, actionsRevealToken) {
         Animatable(if (actionsRevealToken > 0) 0f else 1f)
@@ -4446,8 +5026,11 @@ fun TaskCard(
                 }
             }
             .then(
-                if (isDragPreview || isDragging) Modifier else Modifier
-                    .pointerInput(task.id) {
+                when {
+                    linkPickMode -> Modifier.clickable { onLinkPick() }
+                    selectionMode -> Modifier.clickable { onToggleSelected() }
+                    isDragPreview || isDragging -> Modifier
+                    else -> Modifier.pointerInput(task.id) {
                         detectDragGesturesAfterLongPress(
                             onDragStart = { localOffset ->
                                 moreMenuExpanded = false
@@ -4463,6 +5046,7 @@ fun TaskCard(
                             onDragCancel = {}
                         )
                     }
+                }
             )
             .then(
                 if (compactEisenhower) {
@@ -4480,7 +5064,12 @@ fun TaskCard(
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = if (isInProgress) 6.dp else 0.dp),
         border = when {
-            isHighlighted -> androidx.compose.foundation.BorderStroke(2.5.dp, MaterialTheme.colorScheme.tertiary)
+            isSelected || isLinkPickPending ->
+                androidx.compose.foundation.BorderStroke(3.5.dp, MaterialTheme.colorScheme.onSurface)
+            isLinkPickParent ->
+                androidx.compose.foundation.BorderStroke(3.dp, MaterialTheme.colorScheme.primary)
+            isHighlighted ->
+                androidx.compose.foundation.BorderStroke(2.5.dp, MaterialTheme.colorScheme.tertiary)
             isInProgress -> androidx.compose.foundation.BorderStroke(2.dp, inProgressGradient)
             compactEisenhower -> androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.28f))
             task.isNotDone ->
@@ -4509,12 +5098,25 @@ fun TaskCard(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(TaskCardRowContentMinHeight),
+                    .then(
+                        if (titleExpanded) Modifier.heightIn(min = TaskCardRowContentMinHeight)
+                        else Modifier.height(TaskCardRowContentMinHeight)
+                    ),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(TaskRowTrailingGap)
             ) {
-                var titleMarquee by remember(task.id) { mutableStateOf(false) }
                 var titleOverflows by remember(task.id, task.title) { mutableStateOf(false) }
+                if (selectionMode) {
+                    Icon(
+                        imageVector = if (isSelected) Icons.Default.CheckCircle else Icons.Outlined.CheckCircle,
+                        contentDescription = null,
+                        tint = if (isSelected) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .size(22.dp)
+                            .clickable { onToggleSelected() }
+                    )
+                }
                 if (compactOverdue) {
                     Box(
                         modifier = Modifier
@@ -4554,38 +5156,39 @@ fun TaskCard(
                 Text(
                     text = task.title,
                     style = MaterialTheme.typography.bodyLarge.copy(
-                        fontWeight = FontWeight.Normal,
+                        fontWeight = if (isSelected || isLinkPickPending || isLinkPickParent) {
+                            FontWeight.Bold
+                        } else {
+                            FontWeight.Normal
+                        },
                         fontFamily = FontFamily.SansSerif,
                         letterSpacing = 0.15.sp,
                         lineHeight = 22.sp
                     ),
-                    maxLines = if (titleMarquee) 1 else 2,
-                    softWrap = !titleMarquee,
-                    overflow = if (titleMarquee) TextOverflow.Clip else TextOverflow.Ellipsis,
+                    maxLines = if (titleExpanded) 12 else 2,
+                    softWrap = true,
+                    overflow = if (titleExpanded) TextOverflow.Clip else TextOverflow.Ellipsis,
                     textDecoration = if (task.isCompleted) TextDecoration.LineThrough else null,
                     color = compactOnColor.copy(alpha = if (task.isNotDone) 0.72f else 1f),
                     onTextLayout = { result ->
-                        if (!titleMarquee) titleOverflows = result.hasVisualOverflow
+                        if (!titleExpanded) titleOverflows = result.hasVisualOverflow
                     },
                     modifier = Modifier
                         .weight(1f)
-                        .then(
-                            if (titleMarquee) {
-                                Modifier.basicMarquee(
-                                    iterations = Int.MAX_VALUE,
-                                    initialDelayMillis = 400,
-                                    delayMillis = 1200
-                                )
-                            } else Modifier
-                        )
-                        .pointerInput(task.id, titleOverflows, titleMarquee) {
+                        .pointerInput(task.id, titleOverflows, titleExpanded, selectionMode, linkPickMode) {
                             detectTapGestures(
                                 onTap = {
-                                    if (titleOverflows || titleMarquee) {
-                                        titleMarquee = !titleMarquee
+                                    when {
+                                        linkPickMode -> onLinkPick()
+                                        selectionMode -> onToggleSelected()
+                                        titleOverflows || titleExpanded -> titleExpanded = !titleExpanded
                                     }
                                 },
+                                onLongPress = {
+                                    if (!selectionMode && !linkPickMode) onEnterSelection()
+                                },
                                 onDoubleTap = {
+                                    if (selectionMode || linkPickMode) return@detectTapGestures
                                     if (task.isCompleted || task.isNotDone) onCriteriaClick()
                                     else onEditClick()
                                 }
@@ -4600,7 +5203,7 @@ fun TaskCard(
                         modifier = Modifier.padding(end = 4.dp)
                     )
                 }
-                if (!isDragPreview) {
+                if (!isDragPreview && !linkPickMode && !selectionMode) {
                     Box(
                         modifier = Modifier
                             .width(TaskActionsClusterWidth)
@@ -4695,6 +5298,16 @@ fun TaskCard(
                             tint = if (compactEisenhower) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
                         ) {
                             DropdownMenuItem(
+                                text = { Text(s.selectTasks, style = MaterialTheme.typography.bodyLarge) },
+                                onClick = {
+                                    moreMenuExpanded = false
+                                    onEnterSelection()
+                                },
+                                leadingIcon = {
+                                    Icon(Icons.Outlined.CheckCircle, contentDescription = null)
+                                }
+                            )
+                            DropdownMenuItem(
                                 text = {
                                     Text(
                                         if (commentsCount > 0) s.commentsCount(commentsCount) else s.comments,
@@ -4718,12 +5331,52 @@ fun TaskCard(
                                 leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) }
                             )
                             DropdownMenuItem(
-                                text = { Text(s.manageTaskLinks, style = MaterialTheme.typography.bodyLarge) },
+                                text = { Text(s.linkToGoal, style = MaterialTheme.typography.bodyLarge) },
                                 onClick = {
                                     moreMenuExpanded = false
                                     onOpenTaskLinks()
                                 },
                                 leadingIcon = { Icon(Icons.Default.AccountTree, contentDescription = null) }
+                            )
+                            if (task.isGoal) {
+                                DropdownMenuItem(
+                                    text = { Text(s.goalSteps, style = MaterialTheme.typography.bodyLarge) },
+                                    onClick = {
+                                        moreMenuExpanded = false
+                                        onOpenGoalSteps()
+                                    },
+                                    leadingIcon = { Icon(Icons.Default.AccountTree, contentDescription = null) }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text(s.createStep, style = MaterialTheme.typography.bodyLarge) },
+                                    onClick = {
+                                        moreMenuExpanded = false
+                                        onCreateStep()
+                                    },
+                                    leadingIcon = { Icon(Icons.Default.Add, contentDescription = null) }
+                                )
+                            }
+                            DropdownMenuItem(
+                                text = { Text(s.takePhoto, style = MaterialTheme.typography.bodyLarge) },
+                                onClick = {
+                                    moreMenuExpanded = false
+                                    onTakePhoto()
+                                },
+                                leadingIcon = { Icon(Icons.Default.PhotoCamera, contentDescription = null) }
+                            )
+                            DropdownMenuItem(
+                                text = {
+                                    val photoCount = appState.taskAttachments.count { it.taskId == task.id }
+                                    Text(
+                                        if (photoCount > 0) s.taskPhotosCount(photoCount) else s.taskPhotos,
+                                        style = MaterialTheme.typography.bodyLarge
+                                    )
+                                },
+                                onClick = {
+                                    moreMenuExpanded = false
+                                    onOpenPhotos()
+                                },
+                                leadingIcon = { Icon(Icons.Default.Image, contentDescription = null) }
                             )
                             DropdownMenuItem(
                                 text = {
@@ -4907,7 +5560,10 @@ fun TaskCard(
             }
             // Bottom strip under ⋮: link icon + related + due (end). Reserved height matches lite cards.
             val hasLinkChips = linkNeighbors.isNotEmpty()
-            if (!isDragPreview && (task.dueDate != null || relatedBoards.isNotEmpty() || hasLinkChips)) {
+            val photoCount = remember(task.id, appState.taskAttachments) {
+                appState.taskAttachments.count { it.taskId == task.id }
+            }
+            if (!isDragPreview && !linkPickMode && (task.dueDate != null || relatedBoards.isNotEmpty() || hasLinkChips || photoCount > 0)) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -4931,6 +5587,26 @@ fun TaskCard(
                         }
                     }
                     Spacer(modifier = Modifier.weight(1f))
+                    if (photoCount > 0) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.clickable { onOpenPhotos() }
+                        ) {
+                            Icon(
+                                Icons.Default.Image,
+                                contentDescription = s.taskPhotos,
+                                modifier = Modifier.size(14.dp),
+                                tint = if (compactEisenhower) Color.White.copy(alpha = 0.9f)
+                                else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = "$photoCount",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (compactEisenhower) Color.White.copy(alpha = 0.9f)
+                                else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
                     if (relatedBoards.isNotEmpty()) {
                         RelatedBoardsButton(
                             links = relatedBoards,
@@ -5008,7 +5684,7 @@ private fun TaskLinksButton(
         ) {
             Icon(
                 imageVector = Icons.Default.AccountTree,
-                contentDescription = s.manageTaskLinks,
+                contentDescription = s.linkToGoal,
                 modifier = Modifier.size(iconSize.coerceAtLeast(10.dp)),
                 tint = tint
             )
@@ -5038,7 +5714,7 @@ private fun TaskLinksButton(
             }
             HorizontalDivider()
             DropdownMenuItem(
-                text = { Text(s.manageTaskLinks) },
+                text = { Text(s.linkToGoal) },
                 onClick = {
                     expanded = false
                     onManageLinks()
@@ -6183,7 +6859,7 @@ private fun LiteTaskRow(
                 textDecoration = if (isCompleted) TextDecoration.LineThrough else null,
                 modifier = Modifier.weight(1f)
             )
-            // Same two slots as TaskCard (actions cluster + ⋮) so title width never jumps.
+            // Same slots as TaskCard (actions cluster + ⋮) so title width never jumps.
             TaskTrailingWidthReserve()
         }
         if (hasDueDate || hasRelated || hasTaskLinks) {

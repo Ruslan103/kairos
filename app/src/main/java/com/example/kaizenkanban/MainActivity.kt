@@ -17,6 +17,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
 import com.example.kaizenkanban.data.local.AppDatabase
 import com.example.kaizenkanban.data.local.KairosPreferences
+import com.example.kaizenkanban.data.local.TaskAttachmentStore
 import com.example.kaizenkanban.data.repository.KanbanRepositoryImpl
 import com.example.kaizenkanban.domain.usecase.*
 import com.example.kaizenkanban.reminders.DueReminderScheduler
@@ -55,7 +56,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         val database = AppDatabase.getDatabase(this)
-        val repository = KanbanRepositoryImpl(database.kanbanDao(), database)
+        val attachmentStore = TaskAttachmentStore(this)
+        val repository = KanbanRepositoryImpl(database.kanbanDao(), database, attachmentStore)
 
         val kairosPrefs = KairosPreferences(this)
         val initializeDatabaseUseCase = InitializeDatabaseUseCase(
@@ -98,7 +100,8 @@ class MainActivity : ComponentActivity() {
             moveTaskToBoardUseCase,
             exportDataUseCase,
             importDataUseCase,
-            ensureRecurringInstancesUseCase
+            ensureRecurringInstancesUseCase,
+            attachmentStore
         )
         viewModel = ViewModelProvider(this, factory)[SharedViewModel::class.java]
 

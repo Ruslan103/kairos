@@ -37,7 +37,6 @@ import com.example.kaizenkanban.domain.model.Column
 import com.example.kaizenkanban.domain.model.Task
 import com.example.kaizenkanban.domain.model.TaskLink
 import com.example.kaizenkanban.domain.model.TaskLinkGraph
-import com.example.kaizenkanban.ui.components.DialogSectionDivider
 import com.example.kaizenkanban.ui.i18n.LocalAppStrings
 
 @Composable
@@ -49,6 +48,7 @@ fun TaskLinksDialog(
     onAddParent: (parentId: String) -> Boolean,
     onAddChild: (childId: String) -> Boolean,
     onRemoveLink: (parentId: String, childId: String) -> Unit,
+    onCreateStep: (() -> Unit)? = null,
     onDismiss: () -> Unit,
     onCycleRejected: () -> Unit = {}
 ) {
@@ -67,7 +67,7 @@ fun TaskLinksDialog(
         title = {
             Column {
                 Text(
-                    text = s.taskLinksTitle,
+                    text = if (task.isGoal) s.goalSteps else s.linkToGoal,
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold
                 )
@@ -87,43 +87,51 @@ fun TaskLinksDialog(
                     .heightIn(max = 440.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                LinkSectionHeader(
-                    title = s.taskParents,
-                    onAdd = { pickMode = PickMode.Parent }
-                )
-                if (parents.isEmpty()) {
-                    Text(
-                        text = s.taskLinksEmptyParents,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                if (!task.isGoal) {
+                    LinkSectionHeader(
+                        title = s.taskParents,
+                        onAdd = { pickMode = PickMode.Parent }
                     )
-                } else {
-                    parents.forEach { parentId ->
-                        LinkedTaskRow(
-                            title = tasksById[parentId]?.title ?: parentId,
-                            onRemove = { onRemoveLink(parentId, task.id) }
+                    if (parents.isEmpty()) {
+                        Text(
+                            text = s.taskLinksEmptyParents,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                    } else {
+                        parents.forEach { parentId ->
+                            LinkedTaskRow(
+                                title = tasksById[parentId]?.title ?: parentId,
+                                onRemove = { onRemoveLink(parentId, task.id) }
+                            )
+                        }
                     }
-                }
-
-                DialogSectionDivider()
-
-                LinkSectionHeader(
-                    title = s.taskChildren,
-                    onAdd = { pickMode = PickMode.Child }
-                )
-                if (children.isEmpty()) {
-                    Text(
-                        text = s.taskLinksEmptyChildren,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
                 } else {
-                    children.forEach { childId ->
-                        LinkedTaskRow(
-                            title = tasksById[childId]?.title ?: childId,
-                            onRemove = { onRemoveLink(task.id, childId) }
+                    LinkSectionHeader(
+                        title = s.taskChildren,
+                        onAdd = { pickMode = PickMode.Child }
+                    )
+                    if (children.isEmpty()) {
+                        Text(
+                            text = s.taskLinksEmptyChildren,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                    } else {
+                        children.forEach { childId ->
+                            LinkedTaskRow(
+                                title = tasksById[childId]?.title ?: childId,
+                                onRemove = { onRemoveLink(task.id, childId) }
+                            )
+                        }
+                    }
+                    if (onCreateStep != null) {
+                        TextButton(onClick = {
+                            onDismiss()
+                            onCreateStep()
+                        }) {
+                            Text(s.createStep, maxLines = 1)
+                        }
                     }
                 }
             }
@@ -143,9 +151,12 @@ fun TaskLinksDialog(
             allTasks.filter { candidate ->
                 candidate.id != task.id &&
                     candidate.id !in linked &&
-                    !when (mode) {
-                        PickMode.Parent -> TaskLinkGraph.wouldCreateCycle(links, candidate.id, task.id)
-                        PickMode.Child -> TaskLinkGraph.wouldCreateCycle(links, task.id, candidate.id)
+                    when (mode) {
+                        PickMode.Parent ->
+                            candidate.isGoal &&
+                                !TaskLinkGraph.wouldCreateCycle(links, candidate.id, task.id)
+                        PickMode.Child ->
+                            !TaskLinkGraph.wouldCreateCycle(links, task.id, candidate.id)
                     }
             }
         }
@@ -156,6 +167,10 @@ fun TaskLinksDialog(
             },
             candidates = candidates,
             columns = columns,
+            emptyMessage = when (mode) {
+                PickMode.Parent -> s.noGoalsToLink
+                PickMode.Child -> s.noTasksToLink
+            },
             onPick = { candidate ->
                 val ok = when (mode) {
                     PickMode.Parent -> onAddParent(candidate.id)
@@ -174,6 +189,7 @@ fun TaskLinkPickerDialog(
     title: String,
     candidates: List<Task>,
     columns: List<Column>,
+    emptyMessage: String? = null,
     onPick: (Task) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -229,7 +245,7 @@ fun TaskLinkPickerDialog(
                 )
                 if (filtered.isEmpty()) {
                     Text(
-                        text = s.noTasksToLink,
+                        text = emptyMessage ?: s.noTasksToLink,
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(vertical = 16.dp)

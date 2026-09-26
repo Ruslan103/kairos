@@ -294,6 +294,12 @@ fun SettingsScreen(
                 ) {
                     Text(s.exportFile)
                 }
+                Text(
+                    text = s.exportPhotosWarning,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 6.dp)
+                )
                 Spacer(modifier = Modifier.height(8.dp))
                 OutlinedButton(
                     onClick = {

@@ -75,6 +75,13 @@ interface KanbanRepository {
     suspend fun deleteTaskLink(parentId: String, childId: String)
     suspend fun deleteTaskLinksForTask(taskId: String)
 
+    // Task attachments (local photos)
+    fun getAllTaskAttachments(): Flow<List<TaskAttachment>>
+    suspend fun insertTaskAttachment(attachment: TaskAttachment)
+    suspend fun deleteTaskAttachment(id: String)
+    suspend fun deleteAttachmentsByTask(taskId: String)
+    suspend fun getAttachmentsForTask(taskId: String): List<TaskAttachment>
+
     // Stats journal
     fun getAllStatsJournal(): Flow<List<StatsJournalEntry>>
     suspend fun insertStatsJournal(entry: StatsJournalEntry)

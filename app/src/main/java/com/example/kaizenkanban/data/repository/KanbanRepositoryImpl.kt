@@ -2,6 +2,7 @@ package com.example.kaizenkanban.data.repository
 
 import com.example.kaizenkanban.data.local.AppDatabase
 import com.example.kaizenkanban.data.local.KanbanDao
+import com.example.kaizenkanban.data.local.TaskAttachmentStore
 import com.example.kaizenkanban.data.mapper.toDomain
 import com.example.kaizenkanban.data.mapper.toEntity
 import com.example.kaizenkanban.data.mapper.toLinkedColumnIds
@@ -15,7 +16,8 @@ import kotlinx.coroutines.flow.map
 
 class KanbanRepositoryImpl(
     private val dao: KanbanDao,
-    private val database: AppDatabase? = null
+    private val database: AppDatabase? = null,
+    private val attachmentStore: TaskAttachmentStore? = null
 ) : KanbanRepository {
 
     private suspend fun <T> transactional(block: suspend () -> T): T {
@@ -121,9 +123,12 @@ class KanbanRepositoryImpl(
     override suspend fun insertTask(task: Task) = dao.insertTask(task.toEntity())
     override suspend fun updateTasks(tasks: List<Task>) = dao.updateTasks(tasks.map { it.toEntity() })
     override suspend fun deleteTask(taskId: String) {
+        val attachments = dao.getAttachmentsForTask(taskId)
         dao.deleteCommentsByTask(taskId)
         dao.deleteTaskLinksForTask(taskId)
+        dao.deleteAttachmentsByTask(taskId)
         dao.deleteTask(taskId)
+        attachments.forEach { attachmentStore?.deleteRelative(it.relativePath) }
     }
     override suspend fun deleteTasksByColumn(columnId: String) = dao.deleteTasksByColumn(columnId)
     override suspend fun deleteCompletedTasksByColumn(columnId: String) = dao.deleteCompletedTasksByColumn(columnId)
@@ -175,6 +180,27 @@ class KanbanRepositoryImpl(
     override suspend fun deleteTaskLinksForTask(taskId: String) =
         dao.deleteTaskLinksForTask(taskId)
 
+    override fun getAllTaskAttachments(): Flow<List<TaskAttachment>> =
+        dao.getAllTaskAttachments().map { list -> list.map { it.toDomain() } }
+
+    override suspend fun insertTaskAttachment(attachment: TaskAttachment) =
+        dao.insertTaskAttachment(attachment.toEntity())
+
+    override suspend fun deleteTaskAttachment(id: String) {
+        val existing = dao.getAllTaskAttachments().first().find { it.id == id }
+        dao.deleteTaskAttachment(id)
+        if (existing != null) attachmentStore?.deleteRelative(existing.relativePath)
+    }
+
+    override suspend fun deleteAttachmentsByTask(taskId: String) {
+        val existing = dao.getAttachmentsForTask(taskId)
+        dao.deleteAttachmentsByTask(taskId)
+        existing.forEach { attachmentStore?.deleteRelative(it.relativePath) }
+    }
+
+    override suspend fun getAttachmentsForTask(taskId: String): List<TaskAttachment> =
+        dao.getAttachmentsForTask(taskId).map { it.toDomain() }
+
     override fun getAllStatsJournal(): Flow<List<StatsJournalEntry>> =
         dao.getAllStatsJournal().map { list -> list.map { it.toDomain() } }
 
@@ -201,9 +227,12 @@ class KanbanRepositoryImpl(
             val primaryRemoved = task.columnId in columnIds
             when {
                 primaryRemoved && links.isEmpty() -> {
+                    val attachments = dao.getAttachmentsForTask(task.id)
                     dao.deleteCommentsByTask(task.id)
                     dao.deleteTaskLinksForTask(task.id)
+                    dao.deleteAttachmentsByTask(task.id)
                     dao.deleteTask(task.id)
+                    attachments.forEach { attachmentStore?.deleteRelative(it.relativePath) }
                 }
                 primaryRemoved -> {
                     val newHome = links.first()

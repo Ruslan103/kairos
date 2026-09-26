@@ -706,12 +706,7 @@ private fun RecurringTemplateDialog(
                 }
 
                 DialogSectionDivider()
-                Text(s.manageTaskLinks, fontWeight = FontWeight.SemiBold)
-                Text(
-                    s.taskParents,
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Text(s.taskParents, fontWeight = FontWeight.SemiBold)
                 linkParentIds.forEach { parentId ->
                     val parentTitle = tasksById[parentId]?.title ?: parentId
                     Row(
@@ -719,7 +714,7 @@ private fun RecurringTemplateDialog(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = s.parentChip(parentTitle),
+                            text = s.linkedToGoal(parentTitle),
                             style = MaterialTheme.typography.bodyMedium,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -792,6 +787,7 @@ private fun RecurringTemplateDialog(
                             linkParentIds = linkParentIds.toList(),
                             linkChildIds = linkChildIds.toList(),
                             complexity = complexity,
+                            skippedOccurrenceKeys = initial?.skippedOccurrenceKeys.orEmpty(),
                             createdAt = initial?.createdAt ?: System.currentTimeMillis()
                         )
                     )
@@ -817,7 +813,8 @@ private fun RecurringTemplateDialog(
             projectTasks.filter { candidate ->
                 when (pickMode) {
                     "parent" -> {
-                        candidate.id !in linkParentIds &&
+                        candidate.isGoal &&
+                            candidate.id !in linkParentIds &&
                             candidate.id !in linkChildIds &&
                             linkChildIds.none {
                                 TaskLinkGraph.wouldCreateCycle(taskLinks, candidate.id, it)
@@ -837,6 +834,7 @@ private fun RecurringTemplateDialog(
             title = if (pickMode == "parent") s.pickParentTask else s.pickChildTask,
             candidates = candidates,
             columns = projectColumns,
+            emptyMessage = if (pickMode == "parent") s.noGoalsToLink else s.noTasksToLink,
             onPick = { candidate ->
                 if (pickMode == "parent") {
                     linkParentIds = linkParentIds + candidate.id

@@ -5,7 +5,7 @@
 [![Room](https://img.shields.io/badge/Room%20DB-2.6.1-orange?style=flat&logo=sqlite&logoColor=white)](https://developer.android.com/training/data-storage/room)
 [![Architecture](https://img.shields.io/badge/Architecture-Clean%20%2B%20SOLID%20%2B%20MVVM-success)](#architecture)
 [![API](https://img.shields.io/badge/Min%20SDK-26%2B-brightgreen)](https://android-arsenal.com/api?level=26)
-[![Version](https://img.shields.io/badge/Version-1.2.0-blue)](app/build.gradle.kts)
+[![Version](https://img.shields.io/badge/Version-1.2.1-blue)](app/build.gradle.kts)
 [![License: Non-Commercial](https://img.shields.io/badge/License-Non--Commercial-orange.svg)](LICENSE)
 
 **Languages:** [English](README.en.md) · [Русский](README.md)
@@ -46,6 +46,10 @@ It connects goals with today’s actions:
 - Progress bars, movement toward goal, likelihood of completion.
 - Archive clear/delete keeps stats in a journal (unless marked ignore-in-stats).
 
+### AI prompts
+- Project entry: ready-made prompts for ChatGPT / DeepSeek / Claude for a selected goal.
+- Modes: plan steps, gaps, next 7 days, simplify tree, habits, retro, criteria, chance, step Impact 1–5.
+
 ### Primary board and primary hub
 - **Primary board** (`★` in Projects) — default home and quick-add target.
 - **Primary hub** — set in the board **More** menu; opening the board lands there.
@@ -56,7 +60,8 @@ It connects goals with today’s actions:
 - Focus shows on home-screen widgets.
 
 ### Cards and hubs
-- On the settled hub: ⚡ / ✓ and ⋮ (comments, due date, links, criteria, matrix, move, hide, delete…).
+- On the settled hub: ⚡ / ✓ and ⋮ (comments, due date, links, photos, criteria, matrix, move, hide, delete…).
+- Hub task groups (long-press → select → grid); clear groups from the hub header ×.
 - Neighbor hubs stay lite; full chrome appears after the swipe settles.
 - Drag & drop within and across hubs; long-press opens a cross-board drop panel.
 - Double-tap the board title to open Projects; long titles marquee on the settled hub.

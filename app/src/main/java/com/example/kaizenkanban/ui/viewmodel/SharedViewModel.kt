@@ -3,6 +3,7 @@ package com.example.kaizenkanban.ui.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.example.kaizenkanban.data.local.TaskAttachmentStore
 import com.example.kaizenkanban.data.transfer.KairosTransferHelper
 import com.example.kaizenkanban.domain.TaskCompletionGate
 import com.example.kaizenkanban.domain.model.*
@@ -15,6 +16,7 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import java.util.UUID
 
 data class AppState(
@@ -28,6 +30,7 @@ data class AppState(
     val contacts: List<Contact> = emptyList(),
     val recurringTemplates: List<RecurringTemplate> = emptyList(),
     val taskLinks: List<TaskLink> = emptyList(),
+    val taskAttachments: List<TaskAttachment> = emptyList(),
     val statsJournal: List<StatsJournalEntry> = emptyList(),
     val isInitialized: Boolean = false
 )
@@ -35,7 +38,8 @@ data class AppState(
 private data class DeletedTaskSnapshot(
     val task: Task,
     val comments: List<Comment>,
-    val links: List<TaskLink> = emptyList()
+    val links: List<TaskLink> = emptyList(),
+    val recurringSkipKey: String? = null
 )
 
 private data class CoreKanbanData(
@@ -64,7 +68,8 @@ class SharedViewModel(
     private val moveTaskToBoardUseCase: MoveTaskToBoardUseCase,
     private val exportDataUseCase: ExportDataUseCase,
     private val importDataUseCase: ImportDataUseCase,
-    private val ensureRecurringInstancesUseCase: EnsureRecurringInstancesUseCase
+    private val ensureRecurringInstancesUseCase: EnsureRecurringInstancesUseCase,
+    private val attachmentStore: TaskAttachmentStore? = null
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(AppState())
@@ -272,8 +277,11 @@ class SharedViewModel(
                 Pair(pair, templates)
             }.combine(repository.getAllTaskLinks()) { pair, links ->
                 Pair(pair, links)
+            }.combine(repository.getAllTaskAttachments()) { pair, attachments ->
+                Pair(pair, attachments)
             }.combine(repository.getAllStatsJournal()) { pair, journal ->
-                val (triplePair, links) = pair
+                val (linksPair, attachments) = pair
+                val (triplePair, links) = linksPair
                 val (inner, templates) = triplePair
                 val (triple, contacts) = inner
                 val (core, comments, colComments) = triple
@@ -288,6 +296,7 @@ class SharedViewModel(
                     contacts = contacts,
                     recurringTemplates = templates,
                     taskLinks = links,
+                    taskAttachments = attachments,
                     statsJournal = journal,
                     isInitialized = true
                 )
@@ -642,6 +651,39 @@ class SharedViewModel(
         }
     }
 
+    /** Put selected hub tasks into one visual group (same [Task.hubGroupId]). */
+    fun groupHubTasks(taskIds: Collection<String>): Boolean {
+        val unique = taskIds.distinct()
+        if (unique.size < 2) return false
+        viewModelScope.launch {
+            withAllTaskLocks {
+                val selected = unique.mapNotNull { id -> _state.value.tasks.find { it.id == id } }
+                if (selected.size < 2) return@withAllTaskLocks
+                val homeColumn = selected.first().columnId
+                if (selected.any { it.columnId != homeColumn }) return@withAllTaskLocks
+                val groupId = UUID.randomUUID().toString()
+                val ordered = selected.sortedBy { it.position }
+                val basePos = ordered.first().position
+                val updated = ordered.mapIndexed { index, task ->
+                    task.copy(hubGroupId = groupId, position = basePos + index)
+                }
+                repository.updateTasks(updated)
+            }
+        }
+        return true
+    }
+
+    fun ungroupHubTasks(taskIds: Collection<String>) {
+        viewModelScope.launch {
+            withAllTaskLocks {
+                val updated = taskIds.mapNotNull { id ->
+                    _state.value.tasks.find { it.id == id }?.copy(hubGroupId = null)
+                }
+                if (updated.isNotEmpty()) repository.updateTasks(updated)
+            }
+        }
+    }
+
     fun toggleTaskHidden(task: Task) {
         viewModelScope.launch {
             withAllTaskLocks {
@@ -809,6 +851,7 @@ class SharedViewModel(
                     )
                     repository.insertStatsJournal(entry)
                 }
+                recordRecurringSkipIfNeeded(task)
                 deleteTaskUseCase(task.id)
             }
         }
@@ -840,6 +883,7 @@ class SharedViewModel(
                             repository.insertStatsJournal(entry)
                         }
                     }
+                    recordRecurringSkipIfNeeded(task)
                     deleteTaskUseCase(task.id)
                 }
             }
@@ -892,10 +936,12 @@ class SharedViewModel(
         viewModelScope.launch {
             withAllTaskLocks {
                 val task = _state.value.tasks.find { it.id == taskId } ?: return@withAllTaskLocks
+                val skipKey = recordRecurringSkipIfNeeded(task)
                 deletedSnapshots[taskId] = DeletedTaskSnapshot(
                     task = task,
                     comments = _state.value.comments.filter { it.taskId == taskId },
-                    links = _state.value.taskLinks.filter { it.parentId == taskId || it.childId == taskId }
+                    links = _state.value.taskLinks.filter { it.parentId == taskId || it.childId == taskId },
+                    recurringSkipKey = skipKey
                 )
                 deleteTaskUseCase(taskId)
             }
@@ -906,11 +952,36 @@ class SharedViewModel(
         viewModelScope.launch {
             withAllTaskLocks {
                 val snapshot = deletedSnapshots.remove(taskId) ?: return@withAllTaskLocks
+                snapshot.recurringSkipKey?.let { key ->
+                    val templateId = snapshot.task.recurringTemplateId
+                    if (!templateId.isNullOrBlank()) {
+                        val template = _state.value.recurringTemplates.find { it.id == templateId }
+                        if (template != null) {
+                            repository.updateRecurringTemplate(
+                                EnsureRecurringInstancesUseCase.withoutSkippedOccurrence(template, key)
+                            )
+                        }
+                    }
+                }
                 repository.insertTask(snapshot.task)
                 snapshot.comments.forEach { repository.insertComment(it) }
                 snapshot.links.forEach { repository.insertTaskLink(it) }
             }
         }
+    }
+
+    /**
+     * If [task] is a recurring instance, mark that day/time as skipped so ensure
+     * does not recreate it until the next period. Returns the skip key if recorded.
+     */
+    private suspend fun recordRecurringSkipIfNeeded(task: Task): String? {
+        val templateId = task.recurringTemplateId?.takeIf { it.isNotBlank() } ?: return null
+        val key = EnsureRecurringInstancesUseCase.occurrenceKeyForTask(task) ?: return null
+        val template = _state.value.recurringTemplates.find { it.id == templateId } ?: return null
+        repository.updateRecurringTemplate(
+            EnsureRecurringInstancesUseCase.withSkippedOccurrence(template, key)
+        )
+        return key
     }
 
     fun discardDeletedSnapshot(taskId: String) {
@@ -925,6 +996,48 @@ class SharedViewModel(
     fun deleteComment(commentId: String) {
         viewModelScope.launch { deleteCommentUseCase(commentId) }
     }
+
+    /**
+     * @return null on success, or an error key: "limit" | "pro" | "error"
+     * Caller checks Pro before calling; this enforces the per-task limit.
+     */
+    fun addTaskPhoto(taskId: String, projectId: String, uri: Uri, onResult: (String?) -> Unit = {}) {
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                try {
+                    val store = attachmentStore ?: return@withContext "error"
+                    val current = _state.value.taskAttachments.count { it.taskId == taskId }
+                    if (current >= TaskAttachment.MAX_PER_TASK) return@withContext "limit"
+                    val id = UUID.randomUUID().toString()
+                    val relative = store.saveImageFromUri(uri, projectId, taskId, id)
+                    val attachment = TaskAttachment(
+                        id = id,
+                        taskId = taskId,
+                        relativePath = relative,
+                        mimeType = "image/jpeg",
+                        createdAt = System.currentTimeMillis(),
+                        sortOrder = current
+                    )
+                    repository.insertTaskAttachment(attachment)
+                    null
+                } catch (_: Exception) {
+                    "error"
+                }
+            }
+            onResult(result)
+        }
+    }
+
+    fun deleteTaskPhoto(attachmentId: String) {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                repository.deleteTaskAttachment(attachmentId)
+            }
+        }
+    }
+
+    fun attachmentAbsolutePath(relativePath: String): String? =
+        attachmentStore?.absoluteFile(relativePath)?.absolutePath
 
     // Column Comments (Hub comments)
     fun addColumnComment(columnId: String, text: String) {
@@ -1281,7 +1394,8 @@ class SharedViewModelFactory(
     private val moveTaskToBoardUseCase: MoveTaskToBoardUseCase,
     private val exportDataUseCase: ExportDataUseCase,
     private val importDataUseCase: ImportDataUseCase,
-    private val ensureRecurringInstancesUseCase: EnsureRecurringInstancesUseCase
+    private val ensureRecurringInstancesUseCase: EnsureRecurringInstancesUseCase,
+    private val attachmentStore: TaskAttachmentStore? = null
 ) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(SharedViewModel::class.java)) {
@@ -1290,7 +1404,8 @@ class SharedViewModelFactory(
                 repository, initializeDatabaseUseCase, addTaskUseCase, updateTaskUseCase, moveTaskUseCase,
                 addColumnUseCase, deleteColumnUseCase, renameColumnUseCase, deleteTaskUseCase, setDefaultBoardUseCase,
                 addCommentUseCase, deleteCommentUseCase, addColumnCommentUseCase, deleteColumnCommentUseCase,
-                moveTaskToBoardUseCase, exportDataUseCase, importDataUseCase, ensureRecurringInstancesUseCase
+                moveTaskToBoardUseCase, exportDataUseCase, importDataUseCase, ensureRecurringInstancesUseCase,
+                attachmentStore
             ) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")

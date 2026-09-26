@@ -32,7 +32,10 @@ fun GesturesGuideDialog(
         s.gesturesGuideLongTitleTitle to s.gesturesGuideLongTitleBody,
         s.gesturesGuideMoreActionsTitle to s.gesturesGuideMoreActionsBody,
         s.gesturesGuideInProgressTitle to s.gesturesGuideInProgressBody,
-        s.gesturesGuideDueDateTitle to s.gesturesGuideDueDateBody
+        s.gesturesGuideDueDateTitle to s.gesturesGuideDueDateBody,
+        s.gesturesGuideSelectGroupTitle to s.gesturesGuideSelectGroupBody,
+        s.gesturesGuideLinkGoalTitle to s.gesturesGuideLinkGoalBody,
+        s.gesturesGuidePhotosTitle to s.gesturesGuidePhotosBody
     )
 
     AlertDialog(

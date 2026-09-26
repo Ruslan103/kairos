@@ -63,7 +63,9 @@ data class Task(
     /** Explicit goal mark — shown in Review → Goals (including when archived). */
     val isGoal: Boolean = false,
     /** When set on a goal, older completed steps no longer count in that goal’s progress. */
-    val goalStatsEpochMillis: Long? = null
+    val goalStatsEpochMillis: Long? = null,
+    /** Optional visual group inside a hub; same id = same block. */
+    val hubGroupId: String? = null
 ) {
     fun isOnColumn(columnId: String): Boolean =
         this.columnId == columnId || linkedColumnIds.contains(columnId)
@@ -138,6 +140,11 @@ data class RecurringTemplate(
     val linkChildIds: List<String> = emptyList(),
     /** Impact weight 1–5 copied onto spawned instances (null → treat as 1). */
     val complexity: Int? = null,
+    /**
+     * Occurrence keys `"$dayStartMillis:$minutes"` that were dismissed for the day
+     * (user deleted the hub instance). Prevents same-day respawn.
+     */
+    val skippedOccurrenceKeys: List<String> = emptyList(),
     val createdAt: Long
 )
 
@@ -180,3 +187,18 @@ data class TaskLink(
     val childId: String,
     val createdAt: Long = System.currentTimeMillis()
 )
+
+/** Local image attached to a task (files live under app filesDir). */
+data class TaskAttachment(
+    val id: String,
+    val taskId: String,
+    /** Path relative to app filesDir, e.g. attachments/{projectId}/{taskId}/{id}.jpg */
+    val relativePath: String,
+    val mimeType: String = "image/jpeg",
+    val createdAt: Long = System.currentTimeMillis(),
+    val sortOrder: Int = 0
+) {
+    companion object {
+        const val MAX_PER_TASK = 10
+    }
+}

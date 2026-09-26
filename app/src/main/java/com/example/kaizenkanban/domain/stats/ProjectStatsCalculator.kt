@@ -12,7 +12,8 @@ import kotlin.math.roundToInt
 
 enum class StatsPeriod {
     NOW,
-    DAY,
+    TODAY,
+    YESTERDAY,
     WEEK,
     MONTH,
     MONTHS_3,
@@ -81,6 +82,20 @@ data class ProjectStatsSnapshot(
     val triviaPenalty: Float,
     /** How many percentage points rhythm adds (0.15 × R). */
     val rhythmBonus: Float,
+    /**
+     * Goal-specific plan breadth 0…1 (coverage + diversity of levers).
+     * Null when no selected goal.
+     */
+    val planBreadth: Float? = null,
+    /** Active direct children of the selected goal (levers). */
+    val planBranchCount: Int = 0,
+    /** Distinct levers touched by toward-done work in the period. */
+    val planTouchedBranchCount: Int = 0,
+    /**
+     * Change in [chanceToComplete] over the selected period (now − start).
+     * Null when no selected goal.
+     */
+    val chancePeriodDelta: Float? = null,
     val dailyActivity: List<DailyActivityPoint>,
     val goalProgressSeries: List<ProgressPoint>
 )
@@ -91,11 +106,15 @@ object StatsPeriodWindows {
         now: Long = System.currentTimeMillis(),
         epochMillis: Long = 0L
     ): PeriodWindow {
-        val end = now
         val startOfToday = startOfLocalDay(now)
+        val end = when (period) {
+            StatsPeriod.YESTERDAY -> startOfToday - 1L
+            else -> now
+        }
         val rawStart = when (period) {
             StatsPeriod.NOW -> epochMillis.coerceAtMost(startOfToday)
-            StatsPeriod.DAY -> startOfToday
+            StatsPeriod.TODAY -> startOfToday
+            StatsPeriod.YESTERDAY -> startOfToday - DAY_MS
             StatsPeriod.WEEK -> startOfLocalWeek(now)
             StatsPeriod.MONTH -> startOfLocalMonth(now)
             StatsPeriod.MONTHS_3 -> addCalendarMonths(startOfLocalMonth(now), -2)
@@ -275,6 +294,33 @@ object GoalProgressCalculator {
         return (num / den).toFloat().coerceIn(-1f, 1f)
     }
 
+    /**
+     * Goal progress as of [asOfMillis] (completions / journal after that instant are ignored).
+     */
+    fun progressAsOf(
+        goalId: String,
+        tasksById: Map<String, Task>,
+        links: List<TaskLink>,
+        asOfMillis: Long,
+        journal: List<StatsJournalEntry> = emptyList()
+    ): Float {
+        val virtual = tasksById.mapValues { (_, task) ->
+            when {
+                task.isNotDone -> task
+                task.isCompleted && (task.completedAt ?: Long.MAX_VALUE) > asOfMillis ->
+                    task.copy(
+                        isCompleted = false,
+                        completedAt = null,
+                        completionQuality = null,
+                        workflowStatus = TaskWorkflow.OPEN
+                    )
+                else -> task
+            }
+        }
+        val journalUpTo = journal.filter { it.eventAt <= asOfMillis }
+        return progressOf(goalId, virtual, links, journal = journalUpTo)
+    }
+
     fun periodDelta(
         goalId: String,
         tasksById: Map<String, Task>,
@@ -436,14 +482,55 @@ object ProjectStatsCalculator {
         val hatP = selected?.let { g ->
             (g.progress + rhythmBonus - triviaPenalty).coerceIn(0f, 1f)
         }
+        val planBreadthInfo = selected?.let { g ->
+            computePlanBreadth(
+                goalId = g.goalId,
+                tasksById = tasksById,
+                links = projectLinks,
+                liveDone = liveDone,
+                journalDone = journalDone,
+                weightOf = { id -> w(id) }
+            )
+        }
         val chance = selected?.let { g ->
             chanceToComplete(
                 hatP = hatP ?: 0f,
                 progress = g.progress,
                 periodDelta = g.periodDelta,
                 rhythmShare = rhythm,
-                triviaShare = triviaShare
+                triviaShare = triviaShare,
+                planBreadth = planBreadthInfo?.breadth ?: 0f
             )
+        }
+        val chancePeriodDelta = if (selected != null && chance != null) {
+            val justBefore = window.startMillis - 1L
+            val progressStart = GoalProgressCalculator.progressAsOf(
+                goalId = selected.goalId,
+                tasksById = tasksById,
+                links = projectLinks,
+                asOfMillis = justBefore,
+                journal = journal
+            )
+            val breadthStart = computePlanBreadth(
+                goalId = selected.goalId,
+                tasksById = tasksById,
+                links = projectLinks,
+                liveDone = emptyList(),
+                journalDone = emptyList(),
+                weightOf = { id -> w(id) }
+            )
+            // Chance at period open: structure + progress so far, no momentum/rhythm/trivia of this window yet.
+            val chanceStart = chanceToComplete(
+                hatP = progressStart.coerceIn(0f, 1f),
+                progress = progressStart,
+                periodDelta = 0f,
+                rhythmShare = 0f,
+                triviaShare = 0f,
+                planBreadth = breadthStart.breadth
+            )
+            (chance - chanceStart).coerceIn(-1f, 1f)
+        } else {
+            null
         }
         val towardShare = if (doneInPeriod <= 0) {
             null
@@ -498,31 +585,156 @@ object ProjectStatsCalculator {
             triviaShare = triviaShare,
             triviaPenalty = triviaPenalty,
             rhythmBonus = rhythmBonus,
+            planBreadth = planBreadthInfo?.breadth,
+            planBranchCount = planBreadthInfo?.branchCount ?: 0,
+            planTouchedBranchCount = planBreadthInfo?.touchedBranchCount ?: 0,
+            chancePeriodDelta = chancePeriodDelta,
             dailyActivity = daily,
             goalProgressSeries = series
         )
     }
 
     /**
+     * Soft saturation: 4 active levers → full coverage score.
+     * Avoids rewarding endless empty cards.
+     */
+    const val PLAN_BREADTH_SATURATION = 4
+
+    data class PlanBreadthInfo(
+        val breadth: Float,
+        val branchCount: Int,
+        val touchedBranchCount: Int
+    )
+
+    /**
      * Heuristic index (0…1), not a calibrated probability.
-     * Combines assessment, momentum this period, rhythm, and low trivia.
+     * Combines assessment, momentum, rhythm, low trivia, progress, and plan breadth.
      */
     fun chanceToComplete(
         hatP: Float,
         progress: Float,
         periodDelta: Float,
         rhythmShare: Float,
-        triviaShare: Float
+        triviaShare: Float,
+        planBreadth: Float = 0f
     ): Float {
         val p = progress.coerceIn(-1f, 1f).coerceAtLeast(0f)
         val momentum = periodDelta.coerceIn(0f, 1f)
         return (
             0.45f * hatP.coerceIn(0f, 1f) +
-                0.20f * momentum +
-                0.15f * rhythmShare.coerceIn(0f, 1f) +
+                0.15f * momentum +
+                0.12f * rhythmShare.coerceIn(0f, 1f) +
                 0.10f * (1f - triviaShare.coerceIn(0f, 1f)) +
-                0.10f * p
+                0.08f * p +
+                0.10f * planBreadth.coerceIn(0f, 1f)
             ).coerceIn(0f, 1f)
+    }
+
+    /**
+     * Plan breadth for a goal: coverage of active levers + diversity of recent toward-work,
+     * with a light penalty when one recurring habit dominates a multi-branch plan.
+     */
+    fun computePlanBreadth(
+        goalId: String,
+        tasksById: Map<String, Task>,
+        links: List<TaskLink>,
+        liveDone: List<Task>,
+        journalDone: List<StatsJournalEntry>,
+        weightOf: (String) -> Int = { id ->
+            TaskLinkGraph.nodeWeight(id, tasksById, links)
+        }
+    ): PlanBreadthInfo {
+        val childrenMap = TaskLinkGraph.childrenOf(links)
+        val directKids = childrenMap[goalId].orEmpty()
+        val activeBranches = directKids.filter { id ->
+            val t = tasksById[id] ?: return@filter false
+            !t.statsExcluded && !t.isBoardArchived
+        }
+        val branchCount = activeBranches.size
+        val coverage = (branchCount.toFloat() / PLAN_BREADTH_SATURATION.toFloat()).coerceIn(0f, 1f)
+
+        val branchOf = branchMembership(goalId, activeBranches, childrenMap)
+        val goalDescendants = descendantsOf(setOf(goalId), links)
+
+        val towardLive = liveDone.filter { it.id in goalDescendants || it.id == goalId }
+        val towardJournal = journalDone.filter { entry ->
+            entry.towardGoal && (goalId in entry.relatedGoalIds || entry.sourceTaskId in goalDescendants)
+        }
+
+        val touched = mutableSetOf<String>()
+        var towardWeight = 0
+        val weightByRecurring = mutableMapOf<String, Int>()
+
+        towardLive.forEach { task ->
+            val w = weightOf(task.id).coerceAtLeast(1)
+            towardWeight += w
+            branchOf[task.id]?.let { touched += it }
+            val key = task.recurringTemplateId
+            if (key != null) {
+                weightByRecurring[key] = (weightByRecurring[key] ?: 0) + w
+            }
+        }
+        towardJournal.forEach { entry ->
+            val w = entry.weight.coerceAtLeast(1)
+            towardWeight += w
+            val source = entry.sourceTaskId
+            branchOf[source]?.let { touched += it }
+                ?: run {
+                    // Ghost step that was a direct child
+                    if (source in activeBranches) touched += source
+                }
+            val key = entry.recurringTemplateId
+            if (key != null) {
+                weightByRecurring[key] = (weightByRecurring[key] ?: 0) + w
+            }
+        }
+
+        val touchedCount = touched.size
+        val diversity = when {
+            branchCount <= 0 -> 0f
+            towardWeight <= 0 -> coverage
+            else -> (touchedCount.toFloat() / PLAN_BREADTH_SATURATION.toFloat()).coerceIn(0f, 1f)
+        }
+
+        var breadth = (0.55f * coverage + 0.45f * diversity).coerceIn(0f, 1f)
+
+        // One recurring habit carrying almost all toward-work on a multi-lever plan.
+        if (branchCount >= 2 && towardWeight > 0) {
+            val maxRecurring = weightByRecurring.values.maxOrNull() ?: 0
+            val share = maxRecurring.toFloat() / towardWeight.toFloat()
+            if (share >= 0.85f) {
+                breadth = (breadth * 0.72f).coerceIn(0f, 1f)
+            }
+        }
+
+        return PlanBreadthInfo(
+            breadth = breadth,
+            branchCount = branchCount,
+            touchedBranchCount = touchedCount
+        )
+    }
+
+    /** Map every descendant task id → its direct-child branch under [goalId]. */
+    private fun branchMembership(
+        goalId: String,
+        activeBranches: List<String>,
+        childrenMap: Map<String, List<String>>
+    ): Map<String, String> {
+        val out = mutableMapOf<String, String>()
+        activeBranches.forEach { branchId ->
+            out[branchId] = branchId
+            val stack = ArrayDeque(childrenMap[branchId].orEmpty())
+            val seen = mutableSetOf(branchId)
+            while (stack.isNotEmpty()) {
+                val id = stack.removeFirst()
+                if (!seen.add(id)) continue
+                out[id] = branchId
+                childrenMap[id].orEmpty().forEach { stack.add(it) }
+            }
+        }
+        // goal root itself is not a branch lever
+        out.remove(goalId)
+        return out
     }
 
     private fun buildDailyActivity(

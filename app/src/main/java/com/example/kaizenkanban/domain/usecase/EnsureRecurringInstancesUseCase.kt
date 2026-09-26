@@ -94,6 +94,9 @@ class EnsureRecurringInstancesUseCase(
                 ?: 0
 
             for (minutes in times) {
+                val skipKey = occurrenceKey(startToday, minutes)
+                if (skipKey in template.skippedOccurrenceKeys) continue
+
                 val already = tasks.any { task ->
                     task.recurringTemplateId == template.id &&
                         task.dueDate != null &&
@@ -152,6 +155,37 @@ class EnsureRecurringInstancesUseCase(
 
     companion object {
         private const val DAY_MS = 24L * 60 * 60 * 1000
+        private const val SKIP_RETAIN_DAYS = 60
+
+        fun occurrenceKey(dayStartMillis: Long, minutes: Int): String =
+            "$dayStartMillis:${minutes.coerceIn(0, 24 * 60 - 1)}"
+
+        /** Key for the day/time slot this instance occupies, or null if undated. */
+        fun occurrenceKeyForTask(task: Task): String? {
+            val due = task.dueDate ?: return null
+            val dayStart = startOfDay(due)
+            val minutes = task.reminderMinutesOfDay?.coerceIn(0, 24 * 60 - 1)
+                ?: Calendar.getInstance().apply { timeInMillis = due }.let {
+                    it.get(Calendar.HOUR_OF_DAY) * 60 + it.get(Calendar.MINUTE)
+                }
+            return occurrenceKey(dayStart, minutes)
+        }
+
+        fun pruneSkippedKeys(keys: List<String>, now: Long = System.currentTimeMillis()): List<String> {
+            val cutoff = startOfDay(now) - SKIP_RETAIN_DAYS * DAY_MS
+            return keys.filter { key ->
+                val dayPart = key.substringBefore(':').toLongOrNull() ?: return@filter false
+                dayPart >= cutoff
+            }.distinct()
+        }
+
+        fun withSkippedOccurrence(template: RecurringTemplate, key: String): RecurringTemplate {
+            val pruned = pruneSkippedKeys(template.skippedOccurrenceKeys + key)
+            return template.copy(skippedOccurrenceKeys = pruned)
+        }
+
+        fun withoutSkippedOccurrence(template: RecurringTemplate, key: String): RecurringTemplate =
+            template.copy(skippedOccurrenceKeys = template.skippedOccurrenceKeys.filterNot { it == key })
 
         fun startOfDay(now: Long): Long =
             Calendar.getInstance().apply {
