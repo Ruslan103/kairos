@@ -37,6 +37,7 @@ import com.example.kaizenkanban.domain.model.Column
 import com.example.kaizenkanban.domain.model.Task
 import com.example.kaizenkanban.domain.model.TaskLink
 import com.example.kaizenkanban.domain.model.TaskLinkGraph
+import com.example.kaizenkanban.ui.components.DialogMarqueeText
 import com.example.kaizenkanban.ui.i18n.LocalAppStrings
 
 @Composable
@@ -48,7 +49,6 @@ fun TaskLinksDialog(
     onAddParent: (parentId: String) -> Boolean,
     onAddChild: (childId: String) -> Boolean,
     onRemoveLink: (parentId: String, childId: String) -> Unit,
-    onCreateStep: (() -> Unit)? = null,
     onDismiss: () -> Unit,
     onCycleRejected: () -> Unit = {}
 ) {
@@ -66,17 +66,17 @@ fun TaskLinksDialog(
         onDismissRequest = onDismiss,
         title = {
             Column {
-                Text(
+                DialogMarqueeText(
                     text = if (task.isGoal) s.goalSteps else s.linkToGoal,
                     style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 2
                 )
-                Text(
+                DialogMarqueeText(
                     text = task.title,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
+                    maxLines = 2
                 )
             }
         },
@@ -125,14 +125,6 @@ fun TaskLinksDialog(
                             )
                         }
                     }
-                    if (onCreateStep != null) {
-                        TextButton(onClick = {
-                            onDismiss()
-                            onCreateStep()
-                        }) {
-                            Text(s.createStep, maxLines = 1)
-                        }
-                    }
                 }
             }
         },
@@ -149,7 +141,8 @@ fun TaskLinksDialog(
                 PickMode.Child -> children.toSet()
             }
             allTasks.filter { candidate ->
-                candidate.id != task.id &&
+                !candidate.isHidden &&
+                    candidate.id != task.id &&
                     candidate.id !in linked &&
                     when (mode) {
                         PickMode.Parent ->
@@ -217,7 +210,9 @@ fun TaskLinkPickerDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(title) },
+        title = {
+            DialogMarqueeText(text = title, fontWeight = FontWeight.Bold, maxLines = 2)
+        },
         text = {
             Column(
                 modifier = Modifier
@@ -254,27 +249,29 @@ fun TaskLinkPickerDialog(
                     LazyColumn(modifier = Modifier.heightIn(max = 320.dp)) {
                         grouped.forEach { (columnId, hubTitle, hubTasks) ->
                             item(key = "hub-$columnId") {
-                                Text(
+                                DialogMarqueeText(
                                     text = hubTitle,
                                     style = MaterialTheme.typography.labelLarge,
                                     fontWeight = FontWeight.SemiBold,
                                     color = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.padding(top = 10.dp, bottom = 4.dp)
+                                    maxLines = 1,
+                                    modifier = Modifier.padding(top = 10.dp, bottom = 4.dp),
+                                    fillMaxWidth = false
                                 )
                                 HorizontalDivider(
                                     color = MaterialTheme.colorScheme.outline.copy(alpha = 0.65f)
                                 )
                             }
                             items(hubTasks, key = { it.id }) { candidate ->
-                                Text(
+                                DialogMarqueeText(
                                     text = candidate.title,
-                                    style = MaterialTheme.typography.bodyLarge,
+                                    style = MaterialTheme.typography.bodyMedium,
                                     maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .clickable { onPick(candidate) }
-                                        .padding(vertical = 12.dp, horizontal = 4.dp)
+                                        .padding(vertical = 12.dp, horizontal = 4.dp),
+                                    fillMaxWidth = false
                                 )
                             }
                         }
@@ -296,10 +293,12 @@ private fun LinkSectionHeader(title: String, onAdd: () -> Unit) {
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(
+        DialogMarqueeText(
             text = title,
             style = MaterialTheme.typography.titleSmall,
             fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            fillMaxWidth = false,
             modifier = Modifier.weight(1f)
         )
         IconButton(onClick = onAdd) {
@@ -314,11 +313,11 @@ private fun LinkedTaskRow(title: String, onRemove: () -> Unit) {
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(
+        DialogMarqueeText(
             text = title,
             style = MaterialTheme.typography.bodyMedium,
             maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
+            fillMaxWidth = false,
             modifier = Modifier.weight(1f)
         )
         Spacer(modifier = Modifier.width(4.dp))

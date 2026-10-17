@@ -172,6 +172,27 @@ interface KanbanDao {
     @Query("DELETE FROM recurring_templates WHERE projectId = :projectId")
     suspend fun deleteRecurringTemplatesByProject(projectId: String)
 
+    @Query("SELECT * FROM kairos_reminders ORDER BY triggerAtMillis ASC")
+    fun getAllReminders(): Flow<List<KairosReminderEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertReminder(reminder: KairosReminderEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertReminders(reminders: List<KairosReminderEntity>)
+
+    @Query("DELETE FROM kairos_reminders WHERE id = :id")
+    suspend fun deleteReminder(id: String)
+
+    @Query("DELETE FROM kairos_reminders WHERE taskId = :taskId")
+    suspend fun deleteRemindersForTask(taskId: String)
+
+    @Query("DELETE FROM kairos_reminders WHERE recurringTemplateId = :templateId")
+    suspend fun deleteRemindersForTemplate(templateId: String)
+
+    @Query("DELETE FROM kairos_reminders WHERE projectId = :projectId")
+    suspend fun deleteRemindersByProject(projectId: String)
+
     // Task links (DAG)
     @Query("SELECT * FROM task_links ORDER BY createdAt ASC")
     fun getAllTaskLinks(): Flow<List<TaskLinkEntity>>
@@ -213,4 +234,56 @@ interface KanbanDao {
 
     @Query("DELETE FROM stats_journal WHERE projectId = :projectId")
     suspend fun deleteStatsJournalByProject(projectId: String)
+
+    // Project notes
+    @Query("SELECT * FROM project_notes ORDER BY pinned DESC, position ASC, createdAt DESC")
+    fun getAllProjectNotes(): Flow<List<ProjectNoteEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertProjectNote(note: ProjectNoteEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertProjectNotes(notes: List<ProjectNoteEntity>)
+
+    @Query("DELETE FROM project_notes WHERE id = :id")
+    suspend fun deleteProjectNote(id: String)
+
+    @Query("DELETE FROM project_notes WHERE projectId = :projectId")
+    suspend fun deleteProjectNotesByProject(projectId: String)
+
+    @Query("SELECT * FROM note_lines ORDER BY position ASC, createdAt ASC")
+    fun getAllNoteLines(): Flow<List<NoteLineEntity>>
+
+    @Query("SELECT * FROM note_lines WHERE noteId = :noteId ORDER BY position ASC, createdAt ASC")
+    suspend fun getLinesForNote(noteId: String): List<NoteLineEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertNoteLines(lines: List<NoteLineEntity>)
+
+    @Query("DELETE FROM note_lines WHERE id = :id")
+    suspend fun deleteNoteLine(id: String)
+
+    @Query("DELETE FROM note_lines WHERE noteId = :noteId")
+    suspend fun deleteNoteLinesByNote(noteId: String)
+
+    @Query("SELECT * FROM note_photos ORDER BY sortOrder ASC, createdAt ASC")
+    fun getAllNotePhotos(): Flow<List<NotePhotoEntity>>
+
+    @Query("SELECT * FROM note_photos WHERE noteId = :noteId ORDER BY sortOrder ASC, createdAt ASC")
+    suspend fun getPhotosForNote(noteId: String): List<NotePhotoEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertNotePhoto(photo: NotePhotoEntity)
+
+    @Query("DELETE FROM note_photos WHERE id = :id")
+    suspend fun deleteNotePhoto(id: String)
+
+    @Query("DELETE FROM note_photos WHERE noteId = :noteId")
+    suspend fun deleteNotePhotosByNote(noteId: String)
+
+    @Query("SELECT * FROM note_photos WHERE lineId = :lineId")
+    suspend fun getPhotosForLine(lineId: String): List<NotePhotoEntity>
+
+    @Query("DELETE FROM note_photos WHERE lineId = :lineId")
+    suspend fun deleteNotePhotosByLine(lineId: String)
 }

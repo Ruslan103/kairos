@@ -13,8 +13,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.example.kaizenkanban.ui.components.DialogMarqueeText
 import com.example.kaizenkanban.ui.components.DialogSectionDivider
 import com.example.kaizenkanban.ui.i18n.LocalAppStrings
 
@@ -34,13 +34,12 @@ fun PlanningGuideDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(10.dp),
         title = {
-            Text(
+            DialogMarqueeText(
                 text = s.planningGuideTitle,
                 fontWeight = FontWeight.Bold,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
+                maxLines = 3
             )
         },
         text = {
@@ -53,12 +52,11 @@ fun PlanningGuideDialog(
                 sections.forEachIndexed { index, (heading, body) ->
                     if (index > 0) DialogSectionDivider()
                     if (heading != null) {
-                        Text(
+                        DialogMarqueeText(
                             text = heading,
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.SemiBold,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
+                            maxLines = 3
                         )
                     }
                     Text(

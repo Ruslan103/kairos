@@ -36,13 +36,20 @@ object TaskLinkGraph {
         tasksById: Map<String, Task>,
         links: List<TaskLink>,
         memo: MutableMap<String, Int> = mutableMapOf()
+    ): Int = nodeWeight(taskId, tasksById, childrenOf(links), memo)
+
+    fun nodeWeight(
+        taskId: String,
+        tasksById: Map<String, Task>,
+        childrenMap: Map<String, List<String>>,
+        memo: MutableMap<String, Int> = mutableMapOf()
     ): Int {
         memo[taskId]?.let { return it }
-        val kids = childrenOf(links)[taskId].orEmpty()
+        val kids = childrenMap[taskId].orEmpty()
         val weight = if (kids.isEmpty()) {
             tasksById[taskId]?.let { leafWeight(it) } ?: 1
         } else {
-            kids.sumOf { nodeWeight(it, tasksById, links, memo) }
+            kids.sumOf { nodeWeight(it, tasksById, childrenMap, memo) }
         }
         memo[taskId] = weight
         return weight

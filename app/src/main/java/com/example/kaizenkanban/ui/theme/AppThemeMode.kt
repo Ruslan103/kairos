@@ -3,12 +3,14 @@ package com.example.kaizenkanban.ui.theme
 enum class AppThemeMode {
     SYSTEM,
     LIGHT,
-    DARK;
+    DARK,
+    SLATE;
 
     companion object {
         fun fromCode(code: String?): AppThemeMode = when (code?.lowercase()) {
             "light" -> LIGHT
             "dark" -> DARK
+            "slate" -> SLATE
             else -> SYSTEM
         }
     }
@@ -18,5 +20,6 @@ enum class AppThemeMode {
             SYSTEM -> "system"
             LIGHT -> "light"
             DARK -> "dark"
+            SLATE -> "slate"
         }
 }

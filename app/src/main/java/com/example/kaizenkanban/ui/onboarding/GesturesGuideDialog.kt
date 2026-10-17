@@ -13,8 +13,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.example.kaizenkanban.ui.components.DialogMarqueeText
 import com.example.kaizenkanban.ui.components.DialogSectionDivider
 import com.example.kaizenkanban.ui.i18n.LocalAppStrings
 
@@ -31,22 +31,22 @@ fun GesturesGuideDialog(
         s.gesturesGuideEditTaskTitle to s.gesturesGuideEditTaskBody,
         s.gesturesGuideLongTitleTitle to s.gesturesGuideLongTitleBody,
         s.gesturesGuideMoreActionsTitle to s.gesturesGuideMoreActionsBody,
-        s.gesturesGuideInProgressTitle to s.gesturesGuideInProgressBody,
         s.gesturesGuideDueDateTitle to s.gesturesGuideDueDateBody,
+        s.gesturesGuideTimerTitle to s.gesturesGuideTimerBody,
         s.gesturesGuideSelectGroupTitle to s.gesturesGuideSelectGroupBody,
         s.gesturesGuideLinkGoalTitle to s.gesturesGuideLinkGoalBody,
-        s.gesturesGuidePhotosTitle to s.gesturesGuidePhotosBody
+        s.gesturesGuidePhotosTitle to s.gesturesGuidePhotosBody,
+        s.gesturesGuideNotesTitle to s.gesturesGuideNotesBody
     )
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(10.dp),
         title = {
-            Text(
+            DialogMarqueeText(
                 text = s.gesturesGuideTitle,
                 fontWeight = FontWeight.Bold,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
+                maxLines = 3
             )
         },
         text = {
@@ -58,12 +58,11 @@ fun GesturesGuideDialog(
             ) {
                 sections.forEachIndexed { index, (heading, body) ->
                     if (index > 0) DialogSectionDivider()
-                    Text(
+                    DialogMarqueeText(
                         text = heading,
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold,
-                        maxLines = 3,
-                        overflow = TextOverflow.Ellipsis
+                        maxLines = 3
                     )
                     Text(
                         text = body,

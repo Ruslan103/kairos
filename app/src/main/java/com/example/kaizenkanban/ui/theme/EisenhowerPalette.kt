@@ -27,6 +27,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -54,49 +57,95 @@ data class EisenhowerPaletteColors(
     }
 }
 
+private val plainSwatch = EisenhowerSwatch(Color.Transparent, Color.Transparent, Color.Transparent)
+
 enum class EisenhowerPaletteMode {
-    /** Rose · violet · magenta · slate */
+    /** Neutral frames, no quadrant hue. Default. */
+    PLAIN,
+
+    /** Red · violet · pink · slate */
     BERRY,
 
-    /** Rose · purple · gold · slate */
+    /** Red · violet · cyan · slate */
     SUNSET,
 
-    /** Crimson · indigo · cyan · slate */
-    OCEAN;
+    /** Red · emerald · teal · slate */
+    OCEAN,
+
+    /** Red · emerald · cyan · slate */
+    INK,
+
+    /** Red · black · gray · light gray */
+    PEN,
+
+    /** Red · green · emerald · slate */
+    GARDEN;
 
     companion object {
         fun fromCode(code: String?): EisenhowerPaletteMode = when (code?.lowercase()) {
+            "berry" -> BERRY
             "sunset" -> SUNSET
             "ocean" -> OCEAN
-            else -> BERRY
+            "ink" -> INK
+            "pen" -> PEN
+            "garden" -> GARDEN
+            else -> PLAIN
         }
     }
 
     val code: String
         get() = when (this) {
+            PLAIN -> "plain"
             BERRY -> "berry"
             SUNSET -> "sunset"
             OCEAN -> "ocean"
+            INK -> "ink"
+            PEN -> "pen"
+            GARDEN -> "garden"
         }
 
     fun colors(): EisenhowerPaletteColors = when (this) {
+        PLAIN -> EisenhowerPaletteColors(
+            q1 = plainSwatch,
+            q2 = plainSwatch,
+            q3 = plainSwatch,
+            q4 = plainSwatch
+        )
         BERRY -> EisenhowerPaletteColors(
-            q1 = EisenhowerSwatch(Color(0xFFE11D48), Color(0xFFBE123C), Color(0xFFFB7185)),
-            q2 = EisenhowerSwatch(Color(0xFF7C3AED), Color(0xFF6D28D9), Color(0xFFA78BFA)),
-            q3 = EisenhowerSwatch(Color(0xFFC13584), Color(0xFF833AB4), Color(0xFFE1306C)),
-            q4 = EisenhowerSwatch(Color(0xFF64748B), Color(0xFF475569), Color(0xFF94A3B8))
+            q1 = EisenhowerSwatch(inkWine, Color(0xFF5C0017), inkWineOnDark),
+            q2 = EisenhowerSwatch(inkPlum, Color(0xFF5B21B6), inkPlumOnDark),
+            q3 = EisenhowerSwatch(Color(0xFFDB2777), Color(0xFFBE185D), Color(0xFFF9A8D4)),
+            q4 = EisenhowerSwatch(inkStone, Color(0xFF334155), inkStoneOnDark)
         )
         SUNSET -> EisenhowerPaletteColors(
-            q1 = EisenhowerSwatch(Color(0xFFFD1D1D), Color(0xFFE1306C), Color(0xFFFF6B81)),
-            q2 = EisenhowerSwatch(Color(0xFF833AB4), Color(0xFF5B2C8A), Color(0xFFC13584)),
-            q3 = EisenhowerSwatch(Color(0xFFFCAF45), Color(0xFFF77737), Color(0xFFFFD166)),
-            q4 = EisenhowerSwatch(Color(0xFF6B7280), Color(0xFF4B5563), Color(0xFF9CA3AF))
+            q1 = EisenhowerSwatch(inkWine, Color(0xFF5C0017), inkWineOnDark),
+            q2 = EisenhowerSwatch(Color(0xFF8B5CF6), Color(0xFF7C3AED), Color(0xFFDDD6FE)),
+            q3 = EisenhowerSwatch(inkUmber, Color(0xFF155E75), inkUmberOnDark),
+            q4 = EisenhowerSwatch(inkStone, Color(0xFF334155), inkStoneOnDark)
         )
         OCEAN -> EisenhowerPaletteColors(
-            q1 = EisenhowerSwatch(Color(0xFFE11D48), Color(0xFFBE123C), Color(0xFFFB7185)),
-            q2 = EisenhowerSwatch(Color(0xFF405DE6), Color(0xFF5851DB), Color(0xFF7B8CFF)),
-            q3 = EisenhowerSwatch(Color(0xFF0095F6), Color(0xFF0077CC), Color(0xFF38BDF8)),
-            q4 = EisenhowerSwatch(Color(0xFF64748B), Color(0xFF475569), Color(0xFF94A3B8))
+            q1 = EisenhowerSwatch(inkWine, Color(0xFF5C0017), inkWineOnDark),
+            q2 = EisenhowerSwatch(inkNavy, Color(0xFF097969), inkNavyOnDark),
+            q3 = EisenhowerSwatch(inkTeal, Color(0xFF115E59), inkTealOnDark),
+            q4 = EisenhowerSwatch(inkStone, Color(0xFF334155), inkStoneOnDark)
+        )
+        INK -> EisenhowerPaletteColors(
+            q1 = EisenhowerSwatch(inkWine, Color(0xFF5C0017), inkWineOnDark),
+            q2 = EisenhowerSwatch(inkNavy, Color(0xFF097969), inkNavyOnDark),
+            q3 = EisenhowerSwatch(inkUmber, Color(0xFF155E75), inkUmberOnDark),
+            q4 = EisenhowerSwatch(inkStone, Color(0xFF334155), inkStoneOnDark)
+        )
+        PEN -> EisenhowerPaletteColors(
+            q1 = EisenhowerSwatch(inkWine, Color(0xFF5C0017), inkWineOnDark),
+            q2 = EisenhowerSwatch(ink, inkNight, inkNightText),
+            q3 = EisenhowerSwatch(Color(0xFF525252), Color(0xFF404040), Color(0xFFD4D4D4)),
+            q4 = EisenhowerSwatch(Color(0xFFA3A3A3), Color(0xFF737373), Color(0xFFE5E5E5))
+        )
+        GARDEN -> EisenhowerPaletteColors(
+            q1 = EisenhowerSwatch(inkWine, Color(0xFF5C0017), inkWineOnDark),
+            q2 = EisenhowerSwatch(inkOlive, Color(0xFF097969), inkOliveOnDark),
+            q3 = EisenhowerSwatch(inkNavy, Color(0xFF097969), inkNavyOnDark),
+            q4 = EisenhowerSwatch(inkStone, Color(0xFF334155), inkStoneOnDark)
         )
     }
 }
@@ -119,7 +168,7 @@ val LocalEisenhowerPaletteController = staticCompositionLocalOf<EisenhowerPalett
     error("EisenhowerPaletteController is not provided")
 }
 
-val LocalEisenhowerPalette = staticCompositionLocalOf { EisenhowerPaletteMode.BERRY }
+val LocalEisenhowerPalette = staticCompositionLocalOf { EisenhowerPaletteMode.PLAIN }
 
 @Composable
 fun ProvideEisenhowerPalette(
@@ -151,13 +200,18 @@ fun EisenhowerPaletteToggle(modifier: Modifier = Modifier) {
     ) {
         EisenhowerPaletteMode.entries.forEach { mode ->
             val label = when (mode) {
+                EisenhowerPaletteMode.PLAIN -> s.eisenhowerPalettePlain
                 EisenhowerPaletteMode.BERRY -> s.eisenhowerPaletteBerry
                 EisenhowerPaletteMode.SUNSET -> s.eisenhowerPaletteSunset
                 EisenhowerPaletteMode.OCEAN -> s.eisenhowerPaletteOcean
+                EisenhowerPaletteMode.INK -> s.eisenhowerPaletteInk
+                EisenhowerPaletteMode.PEN -> s.eisenhowerPalettePen
+                EisenhowerPaletteMode.GARDEN -> s.eisenhowerPaletteGarden
             }
             PaletteOptionChip(
                 label = label,
                 colors = mode.colors(),
+                plain = mode == EisenhowerPaletteMode.PLAIN,
                 selected = selected == mode,
                 onClick = { controller.select(mode) }
             )
@@ -169,10 +223,11 @@ fun EisenhowerPaletteToggle(modifier: Modifier = Modifier) {
 private fun PaletteOptionChip(
     label: String,
     colors: EisenhowerPaletteColors,
+    plain: Boolean,
     selected: Boolean,
     onClick: () -> Unit
 ) {
-    val shape = RoundedCornerShape(12.dp)
+    val shape = RoundedCornerShape(10.dp)
     Column(
         modifier = Modifier
             .clip(shape)
@@ -193,34 +248,84 @@ private fun PaletteOptionChip(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
+        val onDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            listOf(colors.q1.solid, colors.q2.solid, colors.q3.solid, colors.q4.solid).forEach { color ->
-                Box(
-                    modifier = Modifier
-                        .size(14.dp)
-                        .clip(CircleShape)
-                        .background(color)
-                )
+            if (plain) {
+                repeat(4) {
+                    Box(
+                        modifier = Modifier
+                            .size(14.dp)
+                            .clip(CircleShape)
+                            .border(1.dp, buttonLine(), CircleShape)
+                    )
+                }
+            } else {
+                listOf(colors.q1, colors.q2, colors.q3, colors.q4).forEach { swatch ->
+                    Box(
+                        modifier = Modifier
+                            .size(14.dp)
+                            .clip(CircleShape)
+                            .background(slateReadable(if (onDark) swatch.light else swatch.solid))
+                    )
+                }
             }
         }
     }
 }
 
 @Composable
-fun eisenhowerSolid(quadrant: String?): Color {
-    val swatch = LocalEisenhowerPalette.current.colors().swatch(quadrant)
-    return swatch?.solid ?: Color(0xFF8E8E8E)
+fun eisenhowerPlain(): Boolean =
+    LocalEisenhowerPalette.current == EisenhowerPaletteMode.PLAIN
+
+/** Quadrant frame. Plain mode keeps a neutral line instead of a hue. */
+@Composable
+fun eisenhowerFrameColor(selected: Boolean): Color {
+    if (eisenhowerPlain()) return buttonLine().copy(alpha = if (selected) 1f else 0.72f)
+    return if (selected) Color.White else Color.White.copy(alpha = 0.28f)
 }
 
 @Composable
-fun eisenhowerGradient(quadrant: String?): Brush {
+fun eisenhowerSolid(quadrant: String?): Color {
+    if (eisenhowerPlain()) return buttonLine()
     val swatch = LocalEisenhowerPalette.current.colors().swatch(quadrant)
     return if (swatch == null) {
-        Brush.linearGradient(listOf(Color(0xFF8E8E8E), Color(0xFFB8B8B8)))
+        inkOnPaper(inkStone, inkStoneOnDark)
     } else {
-        Brush.linearGradient(listOf(swatch.dark, swatch.solid, swatch.light))
+        slateReadable(inkOnPaper(swatch.solid, swatch.light))
     }
 }
 
+/** Pale wash of the quadrant hue, so the card stays light instead of a heavy color block. */
 @Composable
-fun eisenhowerOnColor(@Suppress("UNUSED_PARAMETER") quadrant: String?): Color = Color.White
+fun eisenhowerGradient(quadrant: String?): Brush {
+    if (eisenhowerPlain()) return SolidColor(buttonFill())
+    val swatch = LocalEisenhowerPalette.current.colors().swatch(quadrant)
+    val slate = LocalAppThemeMode.current == AppThemeMode.SLATE
+    val solid = if (slate) (swatch?.light ?: inkStoneOnDark) else (swatch?.solid ?: inkStone)
+    val dark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+    val base = if (dark) MaterialTheme.colorScheme.surface else Color.White
+    val amount = when {
+        slate -> 0.48f
+        dark -> 0.34f
+        else -> 0.14f
+    }
+    return SolidColor(lerp(base, solid, amount))
+}
+
+@Composable
+private fun slateReadable(color: Color): Color {
+    if (LocalAppThemeMode.current != AppThemeMode.SLATE) return color
+    val background = MaterialTheme.colorScheme.surface
+    val lighter = maxOf(color.luminance(), background.luminance())
+    val darker = minOf(color.luminance(), background.luminance())
+    val ratio = (lighter + 0.05f) / (darker + 0.05f)
+    return if (ratio >= 3f) color else lerp(color, Color.White, 0.62f)
+}
+
+@Composable
+fun eisenhowerOnColor(quadrant: String?): Color {
+    if (eisenhowerPlain()) return buttonLabel()
+    val swatch = LocalEisenhowerPalette.current.colors().swatch(quadrant)
+    val dark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+    return if (dark) Color.White else (swatch?.solid ?: ink)
+}

@@ -1,6 +1,7 @@
 package com.example.kaizenkanban.data.repository
 
 import com.example.kaizenkanban.data.local.AppDatabase
+import com.example.kaizenkanban.data.local.GalleryNotePhotoStore
 import com.example.kaizenkanban.data.local.KanbanDao
 import com.example.kaizenkanban.data.local.TaskAttachmentStore
 import com.example.kaizenkanban.data.mapper.toDomain
@@ -17,7 +18,8 @@ import kotlinx.coroutines.flow.map
 class KanbanRepositoryImpl(
     private val dao: KanbanDao,
     private val database: AppDatabase? = null,
-    private val attachmentStore: TaskAttachmentStore? = null
+    private val attachmentStore: TaskAttachmentStore? = null,
+    private val notePhotoStore: GalleryNotePhotoStore? = null
 ) : KanbanRepository {
 
     private suspend fun <T> transactional(block: suspend () -> T): T {
@@ -40,6 +42,7 @@ class KanbanRepositoryImpl(
         boardIds.forEach { id -> deleteBoardInternal(id) }
         dao.deleteContactsByProject(projectId)
         dao.deleteRecurringTemplatesByProject(projectId)
+        dao.deleteRemindersByProject(projectId)
         dao.deleteProject(projectId)
     }
     override suspend fun renameProject(projectId: String, newName: String) = dao.renameProject(projectId, newName)
@@ -127,6 +130,7 @@ class KanbanRepositoryImpl(
         dao.deleteCommentsByTask(taskId)
         dao.deleteTaskLinksForTask(taskId)
         dao.deleteAttachmentsByTask(taskId)
+        dao.deleteRemindersForTask(taskId)
         dao.deleteTask(taskId)
         attachments.forEach { attachmentStore?.deleteRelative(it.relativePath) }
     }
@@ -161,11 +165,34 @@ class KanbanRepositoryImpl(
     override suspend fun updateRecurringTemplate(template: RecurringTemplate) =
         dao.updateRecurringTemplate(template.toEntity())
 
-    override suspend fun deleteRecurringTemplate(templateId: String) =
+    override suspend fun deleteRecurringTemplate(templateId: String) {
+        dao.deleteRemindersForTemplate(templateId)
         dao.deleteRecurringTemplate(templateId)
+    }
 
-    override suspend fun deleteRecurringTemplatesByProject(projectId: String) =
+    override suspend fun deleteRecurringTemplatesByProject(projectId: String) {
         dao.deleteRecurringTemplatesByProject(projectId)
+        dao.deleteRemindersByProject(projectId)
+    }
+
+    override fun getAllReminders(): Flow<List<com.example.kaizenkanban.domain.model.KairosReminder>> =
+        dao.getAllReminders().map { list -> list.map { it.toDomain() } }
+
+    override suspend fun insertReminder(reminder: com.example.kaizenkanban.domain.model.KairosReminder) =
+        dao.insertReminder(reminder.toEntity())
+
+    override suspend fun insertReminders(reminders: List<com.example.kaizenkanban.domain.model.KairosReminder>) =
+        dao.insertReminders(reminders.map { it.toEntity() })
+
+    override suspend fun deleteReminder(id: String) = dao.deleteReminder(id)
+
+    override suspend fun deleteRemindersForTask(taskId: String) = dao.deleteRemindersForTask(taskId)
+
+    override suspend fun deleteRemindersForTemplate(templateId: String) =
+        dao.deleteRemindersForTemplate(templateId)
+
+    override suspend fun deleteRemindersByProject(projectId: String) =
+        dao.deleteRemindersByProject(projectId)
 
     // Task links
     override fun getAllTaskLinks(): Flow<List<TaskLink>> =
@@ -210,6 +237,64 @@ class KanbanRepositoryImpl(
     override suspend fun deleteStatsJournal(id: String) =
         dao.deleteStatsJournal(id)
 
+    override fun getAllProjectNotes(): Flow<List<ProjectNote>> =
+        dao.getAllProjectNotes().map { list -> list.map { it.toDomain() } }
+
+    override suspend fun insertProjectNote(note: ProjectNote) =
+        dao.insertProjectNote(note.toEntity())
+
+    override suspend fun insertProjectNotes(notes: List<ProjectNote>) =
+        dao.insertProjectNotes(notes.map { it.toEntity() })
+
+    override suspend fun deleteProjectNote(id: String) {
+        val photos = dao.getPhotosForNote(id)
+        dao.deleteNotePhotosByNote(id)
+        photos.forEach { notePhotoStore?.deleteUri(it.mediaUri) }
+        dao.deleteNoteLinesByNote(id)
+        dao.deleteReminder(NoteReminderIds.forNote(id))
+        dao.deleteProjectNote(id)
+    }
+
+    override suspend fun deleteProjectNotesByProject(projectId: String) {
+        val notes = dao.getAllProjectNotes().first().filter { it.projectId == projectId }
+        notes.forEach { deleteProjectNote(it.id) }
+    }
+
+    override fun getAllNoteLines(): Flow<List<NoteLine>> =
+        dao.getAllNoteLines().map { list -> list.map { it.toDomain() } }
+
+    override suspend fun replaceNoteLines(noteId: String, lines: List<NoteLine>) {
+        val keep = lines.map { it.id }.toSet()
+        dao.getLinesForNote(noteId).filter { it.id !in keep }.forEach { line ->
+            val photos = dao.getPhotosForLine(line.id)
+            dao.deleteNotePhotosByLine(line.id)
+            photos.forEach { notePhotoStore?.deleteUri(it.mediaUri) }
+            dao.deleteNoteLine(line.id)
+        }
+        if (lines.isNotEmpty()) dao.insertNoteLines(lines.map { it.toEntity() })
+    }
+
+    override fun getAllNotePhotos(): Flow<List<NotePhoto>> =
+        dao.getAllNotePhotos().map { list -> list.map { it.toDomain() } }
+
+    override suspend fun insertNotePhoto(photo: NotePhoto) =
+        dao.insertNotePhoto(photo.toEntity())
+
+    override suspend fun deleteNotePhoto(id: String) {
+        val existing = dao.getAllNotePhotos().first().find { it.id == id }
+        dao.deleteNotePhoto(id)
+        existing?.let { notePhotoStore?.deleteUri(it.mediaUri) }
+    }
+
+    override suspend fun deleteNotePhotosByNote(noteId: String) {
+        val photos = dao.getPhotosForNote(noteId)
+        dao.deleteNotePhotosByNote(noteId)
+        photos.forEach { notePhotoStore?.deleteUri(it.mediaUri) }
+    }
+
+    override suspend fun getPhotosForNote(noteId: String): List<NotePhoto> =
+        dao.getPhotosForNote(noteId).map { it.toDomain() }
+
     private suspend fun removeColumnsAndContents(columnIds: Set<String>) {
         if (columnIds.isEmpty()) return
         val allTasks = dao.getAllTasks().first()
@@ -231,6 +316,7 @@ class KanbanRepositoryImpl(
                     dao.deleteCommentsByTask(task.id)
                     dao.deleteTaskLinksForTask(task.id)
                     dao.deleteAttachmentsByTask(task.id)
+                    dao.deleteRemindersForTask(task.id)
                     dao.deleteTask(task.id)
                     attachments.forEach { attachmentStore?.deleteRelative(it.relativePath) }
                 }

@@ -9,6 +9,8 @@
     <string name="widget_quick_add">Add</string>
     <string name="widget_add_task">Add task</string>
     <string name="widget_voice">Dictate task</string>
-    <string name="widget_focus_description">Focus task, or add / dictate a task</string>
+    <string name="widget_add_note">Diary</string>
+    <string name="widget_voice_note">Dictate note</string>
+    <string name="widget_focus_description">Focus task, or add / dictate a task or add a note</string>
     <string name="widget_focus_only_title">Kairos</string>
 </resources>

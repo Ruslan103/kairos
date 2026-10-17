@@ -6,6 +6,7 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <uses-feature
@@ -91,6 +92,7 @@
             android:exported="true">
             <intent-filter>
                 <action android:name="com.example.kaizenkanban.action.DUE_REMINDER" />
+                <action android:name="com.example.kaizenkanban.action.TASK_TIMER" />
                 <action android:name="com.example.kaizenkanban.action.ENSURE_RECURRING" />
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>

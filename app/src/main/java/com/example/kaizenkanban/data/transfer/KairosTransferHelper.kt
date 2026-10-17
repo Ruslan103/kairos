@@ -92,6 +92,11 @@ object KairosTransferHelper {
             obj.put("isGoal", t.isGoal)
             if (t.goalStatsEpochMillis != null) obj.put("goalStatsEpochMillis", t.goalStatsEpochMillis)
             if (t.hubGroupId != null) obj.put("hubGroupId", t.hubGroupId)
+            if (t.startMinutesOfDay != null) obj.put("startMinutesOfDay", t.startMinutesOfDay)
+            if (t.deadlineAt != null) obj.put("deadlineAt", t.deadlineAt)
+            if (t.timerMinutes != null) obj.put("timerMinutes", t.timerMinutes)
+            if (t.cardType.isNotBlank() && t.cardType != "plain") obj.put("cardType", t.cardType)
+            if (t.cardPayload.isNotBlank()) obj.put("cardPayload", t.cardPayload)
             if (t.linkedColumnIds.isNotEmpty()) {
                 val linkedArr = JSONArray()
                 t.linkedColumnIds.forEach { linkedArr.put(it) }
@@ -132,6 +137,7 @@ object KairosTransferHelper {
             obj.put("phone", c.phone)
             obj.put("email", c.email)
             obj.put("role", c.role)
+            if (c.social.isNotBlank()) obj.put("social", c.social)
             obj.put("position", c.position)
             contactsArr.put(obj)
         }
@@ -146,6 +152,48 @@ object KairosTransferHelper {
             linksArr.put(obj)
         }
         root.put("taskLinks", linksArr)
+
+        val notesArr = JSONArray()
+        data.projectNotes.forEach { n ->
+            val obj = JSONObject()
+            obj.put("id", n.id)
+            obj.put("projectId", n.projectId)
+            obj.put("body", n.body)
+            if (n.title.isNotBlank()) obj.put("title", n.title)
+            obj.put("createdAt", n.createdAt)
+            obj.put("updatedAt", n.updatedAt)
+            obj.put("position", n.position)
+            obj.put("pinned", n.pinned)
+            if (n.linkedTaskId != null) obj.put("linkedTaskId", n.linkedTaskId)
+            if (n.reminderAtMillis != null) obj.put("reminderAtMillis", n.reminderAtMillis)
+            notesArr.put(obj)
+        }
+        root.put("projectNotes", notesArr)
+
+        val linesArr = JSONArray()
+        data.noteLines.forEach { line ->
+            val obj = JSONObject()
+            obj.put("id", line.id)
+            obj.put("noteId", line.noteId)
+            obj.put("text", line.text)
+            obj.put("createdAt", line.createdAt)
+            obj.put("position", line.position)
+            linesArr.put(obj)
+        }
+        root.put("noteLines", linesArr)
+
+        val notePhotosArr = JSONArray()
+        data.notePhotos.forEach { p ->
+            val obj = JSONObject()
+            obj.put("id", p.id)
+            obj.put("noteId", p.noteId)
+            if (p.lineId.isNotBlank()) obj.put("lineId", p.lineId)
+            obj.put("mediaUri", p.mediaUri)
+            obj.put("createdAt", p.createdAt)
+            obj.put("sortOrder", p.sortOrder)
+            notePhotosArr.put(obj)
+        }
+        root.put("notePhotos", notePhotosArr)
 
         return root.toString(2)
     }
@@ -256,6 +304,19 @@ object KairosTransferHelper {
                     hubGroupId = if (obj.has("hubGroupId") && !obj.isNull("hubGroupId")) {
                         obj.getString("hubGroupId")
                     } else null,
+                    startMinutesOfDay = if (obj.has("startMinutesOfDay") && !obj.isNull("startMinutesOfDay")) {
+                        obj.getInt("startMinutesOfDay")
+                    } else null,
+                    deadlineAt = if (obj.has("deadlineAt") && !obj.isNull("deadlineAt")) {
+                        obj.getLong("deadlineAt")
+                    } else null,
+                    timerMinutes = if (obj.has("timerMinutes") && !obj.isNull("timerMinutes")) {
+                        obj.getInt("timerMinutes")
+                    } else null,
+                    cardType = if (obj.has("cardType") && !obj.isNull("cardType")) {
+                        obj.getString("cardType")
+                    } else "plain",
+                    cardPayload = obj.optString("cardPayload", ""),
                     linkedColumnIds = buildList {
                         val linkedArr = obj.optJSONArray("linkedColumnIds")
                         if (linkedArr != null) {
@@ -314,6 +375,7 @@ object KairosTransferHelper {
                     phone = obj.optString("phone", ""),
                     email = obj.optString("email", ""),
                     role = obj.optString("role", ""),
+                    social = obj.optString("social", ""),
                     position = obj.optInt("position", i)
                 )
             )
@@ -332,6 +394,59 @@ object KairosTransferHelper {
             )
         }
 
+        val projectNotes = mutableListOf<ProjectNote>()
+        val notesArr = root.optJSONArray("projectNotes") ?: JSONArray()
+        for (i in 0 until notesArr.length()) {
+            val obj = notesArr.getJSONObject(i)
+            projectNotes.add(
+                ProjectNote(
+                    id = obj.getString("id"),
+                    projectId = obj.getString("projectId"),
+                    body = obj.getString("body"),
+                    title = obj.optString("title", ""),
+                    createdAt = obj.getLong("createdAt"),
+                    updatedAt = obj.optLong("updatedAt", obj.getLong("createdAt")),
+                    position = obj.optInt("position", i),
+                    pinned = obj.optBoolean("pinned", false),
+                    linkedTaskId = obj.optString("linkedTaskId", "").ifBlank { null },
+                    reminderAtMillis = if (obj.has("reminderAtMillis") && !obj.isNull("reminderAtMillis")) {
+                        obj.getLong("reminderAtMillis")
+                    } else null
+                )
+            )
+        }
+
+        val noteLines = mutableListOf<NoteLine>()
+        val linesArr = root.optJSONArray("noteLines") ?: JSONArray()
+        for (i in 0 until linesArr.length()) {
+            val obj = linesArr.getJSONObject(i)
+            noteLines.add(
+                NoteLine(
+                    id = obj.getString("id"),
+                    noteId = obj.getString("noteId"),
+                    text = obj.optString("text", ""),
+                    createdAt = obj.optLong("createdAt", 0L),
+                    position = obj.optInt("position", i)
+                )
+            )
+        }
+
+        val notePhotos = mutableListOf<NotePhoto>()
+        val notePhotosArr = root.optJSONArray("notePhotos") ?: JSONArray()
+        for (i in 0 until notePhotosArr.length()) {
+            val obj = notePhotosArr.getJSONObject(i)
+            notePhotos.add(
+                NotePhoto(
+                    id = obj.getString("id"),
+                    noteId = obj.getString("noteId"),
+                    lineId = obj.optString("lineId", ""),
+                    mediaUri = obj.getString("mediaUri"),
+                    createdAt = obj.optLong("createdAt", 0L),
+                    sortOrder = obj.optInt("sortOrder", i)
+                )
+            )
+        }
+
         return KairosTransferData(
             version = version,
             exportedAt = exportedAt,
@@ -344,7 +459,10 @@ object KairosTransferHelper {
             comments = comments,
             columnComments = columnComments,
             contacts = contacts,
-            taskLinks = taskLinks
+            taskLinks = taskLinks,
+            projectNotes = projectNotes,
+            noteLines = noteLines,
+            notePhotos = notePhotos
         )
     }
 

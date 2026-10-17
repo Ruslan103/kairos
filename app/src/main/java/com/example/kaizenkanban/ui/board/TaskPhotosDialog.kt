@@ -1,6 +1,7 @@
 package com.example.kaizenkanban.ui.board
 
 import android.graphics.BitmapFactory
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -42,20 +43,21 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.kaizenkanban.domain.model.Task
 import com.example.kaizenkanban.domain.model.TaskAttachment
+import com.example.kaizenkanban.ui.components.DialogMarqueeText
 import com.example.kaizenkanban.ui.i18n.LocalAppStrings
 
 @Composable
 fun TaskPhotosDialog(
     task: Task,
     attachments: List<TaskAttachment>,
-    resolveAbsolutePath: (String) -> String?,
+    resolvePreviewRef: (String) -> String?,
     canEdit: Boolean,
     onAddPhoto: (android.net.Uri) -> Unit,
     onTakePhoto: () -> Unit,
@@ -64,7 +66,7 @@ fun TaskPhotosDialog(
     onDismiss: () -> Unit
 ) {
     val s = LocalAppStrings.current
-    var previewPath by remember { mutableStateOf<String?>(null) }
+    var previewRef by remember { mutableStateOf<String?>(null) }
     val picker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri ->
@@ -76,17 +78,17 @@ fun TaskPhotosDialog(
         onDismissRequest = onDismiss,
         title = {
             Column {
-                Text(
+                DialogMarqueeText(
                     text = s.taskPhotosCount(attachments.size),
                     style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 2
                 )
-                Text(
+                DialogMarqueeText(
                     text = task.title,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
+                    maxLines = 2
                 )
             }
         },
@@ -114,18 +116,18 @@ fun TaskPhotosDialog(
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         items(attachments, key = { it.id }) { item ->
-                            val abs = resolveAbsolutePath(item.relativePath)
+                            val ref = resolvePreviewRef(item.relativePath)
                             Box(
                                 modifier = Modifier
                                     .aspectRatio(1f)
                                     .clip(RoundedCornerShape(10.dp))
                                     .background(MaterialTheme.colorScheme.surfaceVariant)
                             ) {
-                                LocalFileThumbnail(
-                                    absolutePath = abs,
+                                AttachmentThumbnail(
+                                    previewRef = ref,
                                     modifier = Modifier
                                         .fillMaxSize()
-                                        .clickable { previewPath = abs }
+                                        .clickable(enabled = ref != null) { previewRef = ref }
                                 )
                                 if (canEdit) {
                                     IconButton(
@@ -193,24 +195,24 @@ fun TaskPhotosDialog(
         }
     )
 
-    previewPath?.let { path ->
+    previewRef?.let { ref ->
         Dialog(
-            onDismissRequest = { previewPath = null },
+            onDismissRequest = { previewRef = null },
             properties = DialogProperties(usePlatformDefaultWidth = false)
         ) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.85f))
-                    .clickable { previewPath = null },
+                    .clickable { previewRef = null },
                 contentAlignment = Alignment.Center
             ) {
-                LocalFileThumbnail(
-                    absolutePath = path,
+                AttachmentThumbnail(
+                    previewRef = ref,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(16.dp)
-                        .clip(RoundedCornerShape(12.dp)),
+                        .clip(RoundedCornerShape(10.dp)),
                     contentScale = ContentScale.Fit
                 )
             }
@@ -219,13 +221,24 @@ fun TaskPhotosDialog(
 }
 
 @Composable
-private fun LocalFileThumbnail(
-    absolutePath: String?,
+private fun AttachmentThumbnail(
+    previewRef: String?,
     modifier: Modifier = Modifier,
     contentScale: ContentScale = ContentScale.Crop
 ) {
-    val bitmap = remember(absolutePath) {
-        absolutePath?.let { BitmapFactory.decodeFile(it)?.asImageBitmap() }
+    val context = LocalContext.current
+    val bitmap = remember(previewRef) {
+        previewRef?.let { ref ->
+            runCatching {
+                if (ref.startsWith("content://", ignoreCase = true)) {
+                    context.contentResolver.openInputStream(Uri.parse(ref))?.use { input ->
+                        BitmapFactory.decodeStream(input)?.asImageBitmap()
+                    }
+                } else {
+                    BitmapFactory.decodeFile(ref)?.asImageBitmap()
+                }
+            }.getOrNull()
+        }
     }
     if (bitmap != null) {
         Image(

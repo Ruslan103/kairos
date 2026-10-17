@@ -1,13 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Idle mic: indigo→violet (not red; distinct from add blue→purple). -->
+<!-- Idle mic: emerald ink, same as the in-app voice button. -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item>
         <shape android:shape="oval">
-            <gradient
-                android:angle="135"
-                android:endColor="#A855F7"
-                android:startColor="#4F46E5"
-                android:type="linear" />
+            <solid android:color="#097969" />
         </shape>
     </item>
     <item

@@ -1,4 +1,4 @@
-package com.example.kaizenkanban.ui.settings
+﻿package com.example.kaizenkanban.ui.settings
 
 import android.Manifest
 import android.content.Intent
@@ -10,7 +10,6 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -18,31 +17,27 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -52,19 +47,20 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.example.kaizenkanban.data.local.KairosPreferences
 import com.example.kaizenkanban.reminders.DueReminderScheduler
+import com.example.kaizenkanban.reminders.RecurringEnsureScheduler
+import com.example.kaizenkanban.ui.calendar.localMillisToUtcPicker
+import com.example.kaizenkanban.ui.calendar.startOfLocalDayMillis
+import com.example.kaizenkanban.ui.calendar.utcPickerMillisToLocalNoon
 import com.example.kaizenkanban.ui.i18n.LanguageToggle
 import com.example.kaizenkanban.ui.i18n.LocalAppStrings
 import com.example.kaizenkanban.ui.onboarding.GesturesGuideDialog
 import com.example.kaizenkanban.ui.onboarding.OnboardingDialog
 import com.example.kaizenkanban.ui.onboarding.PlanningGuideDialog
-import com.example.kaizenkanban.ui.resolveQuickAddTarget
-import com.example.kaizenkanban.ui.sanitizeQuickAddPrefs
 import com.example.kaizenkanban.ui.theme.EisenhowerPaletteToggle
 import com.example.kaizenkanban.ui.theme.ThemeToggle
 import com.example.kaizenkanban.ui.viewmodel.SharedViewModel
@@ -189,31 +185,46 @@ fun SettingsScreen(
         ) {
             SettingsSection(title = s.statsEpochTitle) {
                 var epochTick by remember { mutableStateOf(0) }
+                var showEpochPicker by remember { mutableStateOf(false) }
                 val epoch = remember(epochTick) { prefs.statsEpochMillis }
                 val fmt = remember {
                     java.text.SimpleDateFormat("d MMM yyyy", java.util.Locale.getDefault())
                 }
                 Text(
                     text = fmt.format(java.util.Date(epoch)),
+                    modifier = Modifier.clickable { showEpochPicker = true },
                     style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = s.statsEpochHint,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary
                 )
                 Spacer(modifier = Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextButton(onClick = {
-                        prefs.resetStatsEpochToDefault()
-                        epochTick++
-                    }) { Text(s.statsEpochResetYear) }
-                    TextButton(onClick = {
-                        prefs.advanceStatsEpochTo(System.currentTimeMillis())
-                        epochTick++
-                    }) { Text(s.statsResetPeriod) }
+                TextButton(onClick = {
+                    prefs.resetStatsEpochToDefault()
+                    epochTick++
+                }) { Text(s.statsEpochResetYear) }
+                if (showEpochPicker) {
+                    val epochPickerState = rememberDatePickerState(
+                        initialSelectedDateMillis = localMillisToUtcPicker(epoch)
+                    )
+                    DatePickerDialog(
+                        onDismissRequest = { showEpochPicker = false },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                val selected = epochPickerState.selectedDateMillis
+                                if (selected != null) {
+                                    val noon = utcPickerMillisToLocalNoon(selected)
+                                    prefs.statsEpochMillis = startOfLocalDayMillis(noon)
+                                    epochTick++
+                                }
+                                showEpochPicker = false
+                            }) { Text(s.ok) }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showEpochPicker = false }) { Text(s.cancel) }
+                        }
+                    ) {
+                        DatePicker(state = epochPickerState)
+                    }
                 }
             }
 
@@ -230,7 +241,7 @@ fun SettingsScreen(
                 ThemeToggle()
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = "${s.themeSystem} · ${s.themeLight} · ${s.themeDark}",
+                    text = "${s.themeSystem} · ${s.themeLight} · ${s.themeDark} · ${s.themeSlate}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -281,8 +292,6 @@ fun SettingsScreen(
                         prefs.showArchivedBoards = it
                     }
                 )
-                Spacer(modifier = Modifier.height(16.dp))
-                QuickAddDestinationSettings(viewModel = viewModel, prefs = prefs)
             }
 
             HorizontalDivider()
@@ -313,6 +322,12 @@ fun SettingsScreen(
 
             HorizontalDivider()
 
+            SettingsSection(title = s.dataBrowser) {
+                DatabaseBrowserSection(viewModel = viewModel)
+            }
+
+            HorizontalDivider()
+
             SettingsSection(title = s.openSystemNotifications) {
                 Text(
                     text = if (notificationsGranted) {
@@ -336,6 +351,8 @@ fun SettingsScreen(
                                 prefs.reminderHour = hour
                                 prefs.reminderMinute = minute
                                 DueReminderScheduler.sync(context, viewModel.state.value.tasks)
+                                RecurringEnsureScheduler.scheduleNext(context)
+                                viewModel.ensureTodayRecurringInstances()
                             },
                             reminderHour,
                             reminderMinute,
@@ -356,6 +373,42 @@ fun SettingsScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 3,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                var spawnHour by remember { mutableStateOf(prefs.spawnHour) }
+                var spawnMinute by remember { mutableStateOf(prefs.spawnMinute) }
+                OutlinedButton(
+                    onClick = {
+                        android.app.TimePickerDialog(
+                            context,
+                            { _, hour, minute ->
+                                spawnHour = hour
+                                spawnMinute = minute
+                                prefs.spawnHour = hour
+                                prefs.spawnMinute = minute
+                                RecurringEnsureScheduler.scheduleNext(context)
+                                viewModel.ensureTodayRecurringInstances()
+                            },
+                            spawnHour,
+                            spawnMinute,
+                            true
+                        ).show()
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        "${s.recurringSpawnDefaultTime}: ${DueReminderScheduler.formatClock(spawnHour, spawnMinute)}",
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = s.recurringSpawnDefaultTimeHint,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 4,
                     overflow = TextOverflow.Ellipsis
                 )
                 Spacer(modifier = Modifier.height(8.dp))
@@ -468,205 +521,6 @@ fun SettingsScreen(
                 )
             }
         }
-    }
-}
-
-@Composable
-private fun QuickAddDestinationSettings(
-    viewModel: SharedViewModel,
-    prefs: KairosPreferences
-) {
-    val s = LocalAppStrings.current
-    val state by viewModel.state.collectAsState()
-    var boardId by remember { mutableStateOf(prefs.quickAddBoardId) }
-    var columnId by remember { mutableStateOf(prefs.quickAddColumnId) }
-    var showBoardPicker by remember { mutableStateOf(false) }
-
-    LaunchedEffect(state.boards, state.columns) {
-        sanitizeQuickAddPrefs(prefs, state.boards, state.columns)
-        boardId = prefs.quickAddBoardId
-        columnId = prefs.quickAddColumnId
-    }
-
-    val target = remember(state.boards, state.columns, boardId, columnId) {
-        resolveQuickAddTarget(prefs, state.boards, state.columns)
-    }
-
-    Text(
-        text = s.quickAddDestination,
-        style = MaterialTheme.typography.titleSmall,
-        fontWeight = FontWeight.SemiBold,
-        maxLines = 2,
-        overflow = TextOverflow.Ellipsis
-    )
-    Spacer(modifier = Modifier.height(6.dp))
-    if (target != null) {
-        Text(
-            text = s.quickAddGoesTo(s.localized(target.board.name), s.localized(target.column.title)),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-    }
-
-    OutlinedButton(
-        onClick = { showBoardPicker = true },
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Text(
-            text = if (boardId == null) {
-                s.quickAddUsePrimary
-            } else {
-                state.boards.find { it.id == boardId }?.let { s.localized(it.name) } ?: s.quickAddPickBoard
-            },
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth()
-        )
-    }
-
-    val hubsForSelection = remember(state.boards, state.columns, boardId) {
-        val activeBoards = state.boards.filter { !it.isArchived }
-        val board = boardId?.let { id -> activeBoards.find { it.id == id } }
-            ?: activeBoards.find { it.isDefault }
-            ?: activeBoards.firstOrNull()
-        board?.let { b ->
-            state.columns.filter { it.boardId == b.id }.sortedBy { it.position }
-        }.orEmpty()
-    }
-
-    if (hubsForSelection.isNotEmpty()) {
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = s.quickAddPickHub,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-        Spacer(modifier = Modifier.height(6.dp))
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            hubsForSelection.forEach { hub ->
-                val selected = when {
-                    columnId != null -> columnId == hub.id
-                    else -> hub.id == hubsForSelection.first().id
-                }
-                FilterChip(
-                    selected = selected,
-                    onClick = {
-                        columnId = hub.id
-                        prefs.quickAddColumnId = hub.id
-                    },
-                    modifier = Modifier.widthIn(max = 168.dp),
-                    label = {
-                        Text(
-                            text = s.localized(hub.title),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                )
-            }
-        }
-    }
-
-    if (showBoardPicker) {
-        val activeBoards = state.boards.filter { !it.isArchived }
-        AlertDialog(
-            onDismissRequest = { showBoardPicker = false },
-            title = {
-                Text(
-                    text = s.quickAddPickBoard,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            },
-            text = {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 360.dp)
-                        .verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(2.dp)
-                ) {
-                    fun selectPrimary() {
-                        boardId = null
-                        columnId = null
-                        prefs.quickAddBoardId = null
-                        prefs.quickAddColumnId = null
-                        showBoardPicker = false
-                    }
-                    fun selectBoard(boardIdValue: String) {
-                        boardId = boardIdValue
-                        prefs.quickAddBoardId = boardIdValue
-                        val firstHub = state.columns
-                            .filter { it.boardId == boardIdValue }
-                            .minByOrNull { it.position }
-                        columnId = firstHub?.id
-                        prefs.quickAddColumnId = firstHub?.id
-                        showBoardPicker = false
-                    }
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { selectPrimary() }
-                            .padding(vertical = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        RadioButton(
-                            selected = boardId == null,
-                            onClick = { selectPrimary() }
-                        )
-                        Text(
-                            text = s.quickAddUsePrimary,
-                            modifier = Modifier
-                                .weight(1f)
-                                .padding(start = 4.dp),
-                            style = MaterialTheme.typography.bodyLarge,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                    activeBoards.forEach { board ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { selectBoard(board.id) }
-                                .padding(vertical = 2.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            RadioButton(
-                                selected = boardId == board.id,
-                                onClick = { selectBoard(board.id) }
-                            )
-                            Text(
-                                text = buildString {
-                                    append(s.localized(board.name))
-                                    if (board.isDefault) append(" ★")
-                                },
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .padding(start = 4.dp),
-                                style = MaterialTheme.typography.bodyLarge,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { showBoardPicker = false }) { Text(s.cancel) }
-            }
-        )
     }
 }
 

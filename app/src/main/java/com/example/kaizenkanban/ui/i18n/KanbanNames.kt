@@ -23,6 +23,14 @@ object KanbanNames {
             n.equals("No category", ignoreCase = true)
     }
 
+    /** Hub whose cards are goals without a manual mark. Matched by title until its id is remembered. */
+    fun isMainGoalHub(title: String?): Boolean {
+        val t = title?.trim().orEmpty()
+        return t.equals("Главная цель", ignoreCase = true) ||
+            t.equals("Main goal", ignoreCase = true) ||
+            t.equals("Main Goal", ignoreCase = true)
+    }
+
     fun isQ1Hub(title: String): Boolean =
         title.contains("Срочно и важно", ignoreCase = true) ||
             title.contains("Urgent and important", ignoreCase = true)

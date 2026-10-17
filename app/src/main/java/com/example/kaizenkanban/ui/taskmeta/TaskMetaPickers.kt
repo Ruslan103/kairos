@@ -13,6 +13,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import com.example.kaizenkanban.ui.components.DialogChoicePill
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -21,22 +22,20 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.example.kaizenkanban.ui.components.DialogMarqueeText
 import com.example.kaizenkanban.ui.i18n.LocalAppStrings
 
 @Composable
 fun TaskComplexityPicker(
     selected: Int?,
-    onSelect: (Int?) -> Unit
+    onSelect: (Int?) -> Unit,
+    showTitle: Boolean = true
 ) {
     val s = LocalAppStrings.current
-    Text(s.taskComplexity, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-    Spacer(modifier = Modifier.height(4.dp))
-    Text(
-        s.taskComplexityHint,
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant
-    )
-    Spacer(modifier = Modifier.height(6.dp))
+    if (showTitle) {
+        Text(s.taskComplexity, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        Spacer(modifier = Modifier.height(6.dp))
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -44,40 +43,10 @@ fun TaskComplexityPicker(
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         (1..5).forEach { n ->
-            FilterChip(
+            DialogChoicePill(
                 selected = selected == n,
                 onClick = { onSelect(if (selected == n) null else n) },
-                label = { Text(n.toString()) }
-            )
-        }
-    }
-}
-
-@Composable
-fun TaskDurationPicker(
-    selectedMinutes: Int?,
-    onSelect: (Int?) -> Unit
-) {
-    val s = LocalAppStrings.current
-    val presets = listOf(15, 30, 60, 120)
-    Text(s.taskDuration, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-    Spacer(modifier = Modifier.height(6.dp))
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        FilterChip(
-            selected = selectedMinutes == null,
-            onClick = { onSelect(null) },
-            label = { Text(s.taskDurationNone) }
-        )
-        presets.forEach { mins ->
-            FilterChip(
-                selected = selectedMinutes == mins,
-                onClick = { onSelect(if (selectedMinutes == mins) null else mins) },
-                label = { Text(s.taskDurationMinutes(mins)) }
+                label = n.toString()
             )
         }
     }
@@ -94,17 +63,21 @@ fun CompletionQualityDialog(
     var selected by remember(current) { mutableStateOf(current) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(s.rateQualityTitle, fontWeight = FontWeight.Bold) },
+        title = {
+            DialogMarqueeText(
+                text = s.rateQualityTitle,
+                fontWeight = FontWeight.Bold,
+                maxLines = 2
+            )
+        },
         text = {
             Column {
-                Text(title, style = MaterialTheme.typography.bodyMedium, maxLines = 2)
-                Spacer(modifier = Modifier.height(12.dp))
-                Text(
-                    s.rateQualityHint,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                DialogMarqueeText(
+                    text = title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 2
                 )
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(12.dp))
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()

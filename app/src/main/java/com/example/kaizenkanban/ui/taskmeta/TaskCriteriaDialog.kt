@@ -19,16 +19,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.example.kaizenkanban.domain.model.Eisenhower
 import com.example.kaizenkanban.domain.model.Task
+import com.example.kaizenkanban.ui.components.DialogMarqueeText
 import com.example.kaizenkanban.ui.components.DialogSectionDivider
 import com.example.kaizenkanban.ui.i18n.LocalAppStrings
 
 /**
- * Edit stats-related criteria: complexity, duration, quality (if done),
- * importance/urgency.
+ * Edit stats-related criteria: complexity, quality (if done).
  */
 @Composable
 fun TaskCriteriaDialog(
@@ -39,13 +37,17 @@ fun TaskCriteriaDialog(
 ) {
     val s = LocalAppStrings.current
     var complexity by remember(task.id, task.complexity) { mutableStateOf(task.complexity) }
-    var duration by remember(task.id, task.estimatedMinutes) { mutableStateOf(task.estimatedMinutes) }
     var quality by remember(task.id, task.completionQuality) { mutableStateOf(task.completionQuality) }
-    var quadrant by remember(task.id, task.eisenhowerQuadrant) { mutableStateOf(task.eisenhowerQuadrant) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(s.taskCriteriaTitle, fontWeight = FontWeight.Bold) },
+        title = {
+            DialogMarqueeText(
+                text = s.taskCriteriaTitle,
+                fontWeight = FontWeight.Bold,
+                maxLines = 2
+            )
+        },
         text = {
             Column(
                 modifier = Modifier
@@ -53,11 +55,10 @@ fun TaskCriteriaDialog(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                Text(
-                    task.title,
+                DialogMarqueeText(
+                    text = task.title,
                     style = MaterialTheme.typography.bodyMedium,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
+                    maxLines = 2
                 )
 
                 DialogSectionDivider()
@@ -66,15 +67,6 @@ fun TaskCriteriaDialog(
                     onSelect = {
                         complexity = it
                         onUpdate(task.copy(complexity = it))
-                    }
-                )
-
-                DialogSectionDivider()
-                TaskDurationPicker(
-                    selectedMinutes = duration,
-                    onSelect = {
-                        duration = it
-                        onUpdate(task.copy(estimatedMinutes = it))
                     }
                 )
 
@@ -103,36 +95,6 @@ fun TaskCriteriaDialog(
                             )
                         }
                     }
-                }
-
-                DialogSectionDivider()
-                Text(s.importanceLabel, fontWeight = FontWeight.SemiBold)
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    listOf(null, Eisenhower.Q1, Eisenhower.Q2, Eisenhower.Q3, Eisenhower.Q4)
-                        .forEach { q ->
-                            FilterChip(
-                                selected = quadrant == q,
-                                onClick = {
-                                    quadrant = q
-                                    onUpdate(
-                                        task.copy(
-                                            eisenhowerQuadrant = q,
-                                            showEisenhowerButtons = q != null || task.showEisenhowerButtons
-                                        )
-                                    )
-                                },
-                                label = {
-                                    Text(
-                                        q?.let { Eisenhower.getBadge(it) } ?: "—"
-                                    )
-                                }
-                            )
-                        }
                 }
             }
         },

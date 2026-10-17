@@ -1,6 +1,12 @@
 package com.example.kaizenkanban.domain.usecase
 
+import com.example.kaizenkanban.domain.model.NoteLine
+import com.example.kaizenkanban.domain.model.displayTitle
+import com.example.kaizenkanban.domain.model.linesFromNoteBody
+import java.util.UUID
+import com.example.kaizenkanban.domain.model.KairosReminder
 import com.example.kaizenkanban.domain.model.KairosTransferData
+import com.example.kaizenkanban.domain.model.NoteReminderIds
 import com.example.kaizenkanban.domain.model.TaskLink
 import com.example.kaizenkanban.domain.model.TaskLinkGraph
 import com.example.kaizenkanban.domain.repository.KanbanRepository
@@ -75,6 +81,54 @@ class ImportDataUseCase(private val repository: KanbanRepository) {
             if (TaskLinkGraph.wouldCreateCycle(importedLinks, link.parentId, link.childId)) return@forEach
             repository.insertTaskLink(link)
             importedLinks += link
+        }
+
+        val projectIds = data.projects.map { it.id }.toSet()
+        val importedNoteIds = mutableSetOf<String>()
+        val linesByNote = data.noteLines.groupBy { it.noteId }
+        val savedLines = mutableMapOf<String, List<NoteLine>>()
+        data.projectNotes.forEach { note ->
+            if (note.projectId !in projectIds) return@forEach
+            val linked = note.linkedTaskId?.takeIf { it in importedTaskIds }
+            repository.insertProjectNote(note.copy(linkedTaskId = linked))
+            importedNoteIds += note.id
+            val provided = linesByNote[note.id].orEmpty().sortedBy { it.position }
+            var lines = if (provided.isNotEmpty()) provided
+            else linesFromNoteBody(note.id, note.body, note.createdAt)
+            if (lines.isEmpty() && data.notePhotos.any { it.noteId == note.id }) {
+                lines = listOf(
+                    NoteLine(
+                        id = UUID.randomUUID().toString(),
+                        noteId = note.id,
+                        text = "",
+                        createdAt = note.createdAt,
+                        position = 0
+                    )
+                )
+            }
+            if (lines.isNotEmpty()) repository.replaceNoteLines(note.id, lines)
+            savedLines[note.id] = lines
+            note.reminderAtMillis?.let { at ->
+                val text = note.displayTitle().take(80)
+                if (text.isNotBlank()) {
+                    repository.insertReminder(
+                        KairosReminder(
+                            id = NoteReminderIds.forNote(note.id),
+                            projectId = note.projectId,
+                            text = text,
+                            triggerAtMillis = at,
+                            createdAt = note.createdAt
+                        )
+                    )
+                }
+            }
+        }
+        data.notePhotos.forEach { photo ->
+            if (photo.noteId !in importedNoteIds) return@forEach
+            val lineId = photo.lineId.ifBlank {
+                savedLines[photo.noteId]?.firstOrNull()?.id ?: return@forEach
+            }
+            repository.insertNotePhoto(photo.copy(lineId = lineId))
         }
 
         // Ensure a usable primary remains after REPLACE merges (in-session, not only on next init).

@@ -30,13 +30,13 @@ object Eisenhower {
         else -> ""
     }
 
-    /** Default berry palette; UI uses [com.example.kaizenkanban.ui.theme.LocalEisenhowerPalette]. */
+    /** Default berry ink; UI uses [com.example.kaizenkanban.ui.theme.LocalEisenhowerPalette]. */
     fun getColor(quadrant: String?): Long = when (quadrant) {
-        Q1 -> 0xFFE11D48
-        Q2 -> 0xFF7C3AED
-        Q3 -> 0xFFC13584
-        Q4 -> 0xFF64748B
-        else -> 0xFF8E8E8E
+        Q1 -> 0xFF800020
+        Q2 -> 0xFF6D28D9
+        Q3 -> 0xFFDB2777
+        Q4 -> 0xFF475569
+        else -> 0xFF475569
     }
 
     fun getRank(quadrant: String?): Int = when (quadrant) {

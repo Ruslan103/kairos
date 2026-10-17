@@ -11,17 +11,21 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.windowsizeclass.ExperimentalMaterial3WindowSizeClassApi
 import androidx.compose.material3.windowsizeclass.calculateWindowSizeClass
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
 import com.example.kaizenkanban.data.local.AppDatabase
 import com.example.kaizenkanban.data.local.KairosPreferences
+import com.example.kaizenkanban.data.local.GalleryNotePhotoStore
 import com.example.kaizenkanban.data.local.TaskAttachmentStore
 import com.example.kaizenkanban.data.repository.KanbanRepositoryImpl
 import com.example.kaizenkanban.domain.usecase.*
 import com.example.kaizenkanban.reminders.DueReminderScheduler
+import com.example.kaizenkanban.reminders.NoteReminderScheduler
 import com.example.kaizenkanban.reminders.RecurringEnsureScheduler
+import com.example.kaizenkanban.reminders.TaskTimerScheduler
 import com.example.kaizenkanban.ui.i18n.AppLanguage
 import com.example.kaizenkanban.ui.i18n.AppStrings
 import com.example.kaizenkanban.ui.i18n.ProvideAppLanguage
@@ -30,7 +34,6 @@ import com.example.kaizenkanban.ui.theme.KaizenKanbanTheme
 import com.example.kaizenkanban.ui.theme.LocalAppThemeMode
 import com.example.kaizenkanban.ui.theme.ProvideAppTheme
 import com.example.kaizenkanban.ui.theme.ProvideEisenhowerPalette
-import com.example.kaizenkanban.ui.theme.resolveDarkTheme
 import com.example.kaizenkanban.ui.viewmodel.SharedViewModel
 import com.example.kaizenkanban.ui.viewmodel.SharedViewModelFactory
 import com.example.kaizenkanban.widget.KairosWidgetUpdater
@@ -57,7 +60,8 @@ class MainActivity : ComponentActivity() {
 
         val database = AppDatabase.getDatabase(this)
         val attachmentStore = TaskAttachmentStore(this)
-        val repository = KanbanRepositoryImpl(database.kanbanDao(), database, attachmentStore)
+        val notePhotoStore = GalleryNotePhotoStore(this)
+        val repository = KanbanRepositoryImpl(database.kanbanDao(), database, attachmentStore, notePhotoStore)
 
         val kairosPrefs = KairosPreferences(this)
         val initializeDatabaseUseCase = InitializeDatabaseUseCase(
@@ -101,7 +105,9 @@ class MainActivity : ComponentActivity() {
             exportDataUseCase,
             importDataUseCase,
             ensureRecurringInstancesUseCase,
-            attachmentStore
+            attachmentStore,
+            notePhotoStore,
+            KairosPreferences(this)
         )
         viewModel = ViewModelProvider(this, factory)[SharedViewModel::class.java]
 
@@ -122,16 +128,35 @@ class MainActivity : ComponentActivity() {
         }
 
         lifecycleScope.launch {
+            var seenTaskIds = emptySet<String>()
             viewModel.state
                 .map { it.isInitialized to it.tasks }
                 .distinctUntilChanged()
                 .collect { (initialized, tasks) ->
                     if (initialized) {
+                        val currentIds = tasks.map { it.id }.toSet()
+                        val removedIds = seenTaskIds - currentIds
+                        seenTaskIds = currentIds
                         // Yield so Compose can draw the board before alarm/widget work.
                         delay(1)
                         withContext(Dispatchers.IO) {
+                            removedIds.forEach { DueReminderScheduler.dismiss(this@MainActivity, it) }
                             DueReminderScheduler.sync(this@MainActivity, tasks)
+                            TaskTimerScheduler.sync(this@MainActivity, tasks)
                             KairosWidgetUpdater.updateAll(this@MainActivity, tasks)
+                        }
+                    }
+                }
+        }
+
+        lifecycleScope.launch {
+            viewModel.state
+                .map { it.isInitialized to it.reminders }
+                .distinctUntilChanged()
+                .collect { (initialized, reminders) ->
+                    if (initialized) {
+                        withContext(Dispatchers.IO) {
+                            NoteReminderScheduler.sync(this@MainActivity, reminders)
                         }
                     }
                 }
@@ -144,7 +169,10 @@ class MainActivity : ComponentActivity() {
                 ProvideAppTheme(prefs) {
                     ProvideEisenhowerPalette(prefs) {
                         val themeMode = LocalAppThemeMode.current
-                        KaizenKanbanTheme(darkTheme = resolveDarkTheme(themeMode)) {
+                        LaunchedEffect(themeMode) {
+                            KairosWidgetUpdater.updateAll(this@MainActivity)
+                        }
+                        KaizenKanbanTheme(themeMode = themeMode) {
                             AppNavigation(
                                 sharedViewModel = viewModel,
                                 windowSizeClass = windowSizeClass.widthSizeClass
@@ -189,6 +217,14 @@ class MainActivity : ComponentActivity() {
         if (intent.getBooleanExtra(DueReminderScheduler.EXTRA_OPEN_ADD_TASK, false)) {
             viewModel.requestAddTask()
             intent.removeExtra(DueReminderScheduler.EXTRA_OPEN_ADD_TASK)
+        }
+        if (intent.getBooleanExtra(DueReminderScheduler.EXTRA_OPEN_ADD_NOTE, false)) {
+            viewModel.requestAddNote()
+            intent.removeExtra(DueReminderScheduler.EXTRA_OPEN_ADD_NOTE)
+        }
+        if (intent.getBooleanExtra(DueReminderScheduler.EXTRA_OPEN_VOICE_NOTE, false)) {
+            viewModel.requestVoiceNote()
+            intent.removeExtra(DueReminderScheduler.EXTRA_OPEN_VOICE_NOTE)
         }
 
         val uri = intent.data ?: return

@@ -26,6 +26,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Bolt
@@ -37,13 +38,13 @@ import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.AutoStories
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Insights
 import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.MoreVert
@@ -64,7 +65,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -91,9 +91,12 @@ import com.example.kaizenkanban.ui.calendar.DueDateQuickPick
 import com.example.kaizenkanban.ui.calendar.formatDateShort
 import com.example.kaizenkanban.ui.calendar.isDueToday
 import com.example.kaizenkanban.ui.calendar.isOverdueDate
+import com.example.kaizenkanban.ui.calendar.isPastDeadline
 import com.example.kaizenkanban.ui.calendar.localMillisToUtcPicker
 import com.example.kaizenkanban.ui.calendar.relativeDueLabel
 import com.example.kaizenkanban.ui.calendar.utcPickerMillisToLocalNoon
+import com.example.kaizenkanban.ui.board.ContactWriteDialog
+import com.example.kaizenkanban.ui.components.DialogMarqueeText
 import com.example.kaizenkanban.ui.components.DialogSectionDivider
 import com.example.kaizenkanban.ui.i18n.AppLanguage
 import com.example.kaizenkanban.ui.i18n.AppStrings
@@ -103,9 +106,11 @@ import com.example.kaizenkanban.ui.i18n.LocalAppStrings
 import com.example.kaizenkanban.ui.onboarding.OnboardingDialog
 import com.example.kaizenkanban.ui.resolveQuickAddTarget
 import com.example.kaizenkanban.ui.sanitizeQuickAddPrefs
+import com.example.kaizenkanban.ui.theme.buttonFill
+import com.example.kaizenkanban.ui.theme.buttonLabel
+import com.example.kaizenkanban.ui.theme.buttonLine
+import com.example.kaizenkanban.ui.theme.completedMark
 import com.example.kaizenkanban.ui.theme.deleteButtonColor
-import com.example.kaizenkanban.ui.theme.deleteButtonGradient
-import com.example.kaizenkanban.ui.theme.newProjectGradient
 import com.example.kaizenkanban.ui.voice.rememberVoiceAssistantController
 import com.example.kaizenkanban.ui.viewmodel.SharedViewModel
 import java.io.File
@@ -116,12 +121,13 @@ import kotlinx.coroutines.launch
 fun ProjectsScreen(
     viewModel: SharedViewModel,
     onNavigateToBoard: (boardId: String, columnId: String?) -> Unit,
-    onNavigateToCalendar: () -> Unit,
+    onNavigateToCalendar: (projectId: String) -> Unit,
     onNavigateToSettings: () -> Unit = {},
     onNavigateToRecurring: (projectId: String) -> Unit = {},
     onNavigateToEisenhower: (projectId: String) -> Unit = {},
     onNavigateToStats: (projectId: String) -> Unit = {},
     onNavigateToAiPrompts: (projectId: String) -> Unit = {},
+    onNavigateToNotes: (projectId: String) -> Unit = {},
     consumePendingQuickAdd: Boolean = true
 ) {
     val state by viewModel.state.collectAsState()
@@ -207,7 +213,17 @@ fun ProjectsScreen(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
     LaunchedEffect(state.tasks) {
-        focusTaskId = kairosPrefs.inProgressTaskId
+        val id = kairosPrefs.inProgressTaskId
+        val visible = id?.let { tid ->
+            state.tasks.find { it.id == tid && !it.isCompleted && !it.isHidden }
+        }
+        if (visible == null && id != null) {
+            kairosPrefs.inProgressTaskId = null
+            focusTaskId = null
+            KairosWidgetUpdater.updateAll(context, state.tasks)
+        } else {
+            focusTaskId = visible?.id
+        }
     }
     LaunchedEffect(Unit) {
         if (kairosPrefs.projectsCollapsed) kairosPrefs.projectsCollapsed = false
@@ -239,26 +255,25 @@ fun ProjectsScreen(
         }
     }
     val focusTask = remember(state.tasks, focusTaskId) {
-        focusTaskId?.let { id -> state.tasks.find { it.id == id && !it.isCompleted } }
+        focusTaskId?.let { id ->
+            state.tasks.find { it.id == id && !it.isCompleted && !it.isHidden }
+        }
     }
     val density = LocalDensity.current
     var draggedProjectId by remember { mutableStateOf<String?>(null) }
     var draggedOffsetY by remember { mutableStateOf(0f) }
     val reorderThreshold = with(density) { 68.dp.toPx() }
     val sortedProjects = remember(state.projects) { state.projects.sortedBy { it.position } }
-    val overviewTaskCount = remember(state.tasks) { state.tasks.size }
-    val overviewHubCount = remember(state.columns) { state.columns.size }
-    val overviewBoardCount = remember(state.boards, showArchivedBoards) {
-        state.boards.count { showArchivedBoards || !it.isArchived }
-    }
     val needOverviewLists = overviewPanel != null || globalSearchOpen
     val allTasks = remember(state.tasks, needOverviewLists) {
         if (!needOverviewLists) emptyList()
-        else state.tasks.sortedWith(
-            compareBy<Task> { it.isCompleted }
-                .thenBy { it.dueDate ?: Long.MAX_VALUE }
-                .thenByDescending { it.createdAt }
-        )
+        else state.tasks
+            .filter { !it.isHidden }
+            .sortedWith(
+                compareBy<Task> { it.isCompleted }
+                    .thenBy { it.dueDate ?: Long.MAX_VALUE }
+                    .thenByDescending { it.createdAt }
+            )
     }
     val filteredAllTasks = remember(allTasks, taskSearchQuery, taskFilter, needOverviewLists) {
         if (!needOverviewLists) emptyList()
@@ -269,7 +284,7 @@ fun ProjectsScreen(
                 val matchesFilter = when (taskFilter) {
                     TaskOverviewFilter.ACTIVE -> !task.isCompleted
                     TaskOverviewFilter.TODAY -> !task.isCompleted && task.dueDate != null && task.dueDate.isDueToday()
-                    TaskOverviewFilter.OVERDUE -> !task.isCompleted && task.dueDate != null && task.dueDate.isOverdueDate()
+                    TaskOverviewFilter.OVERDUE -> task.isPastDeadline()
                     TaskOverviewFilter.DONE -> task.isCompleted
                     TaskOverviewFilter.ALL -> true
                 }
@@ -392,19 +407,19 @@ fun ProjectsScreen(
                     .statusBarsPadding()
                     .padding(start = 16.dp, end = 8.dp, top = 2.dp, bottom = 2.dp)
             ) {
-                Text(
-                    text = s.myProjects,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    color = MaterialTheme.colorScheme.onBackground
-                )
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Spacer(modifier = Modifier.weight(1f))
+                    Text(
+                        text = s.myProjects,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        color = MaterialTheme.colorScheme.onBackground,
+                        modifier = Modifier.weight(1f)
+                    )
                     IconButton(
                         onClick = {
                             globalSearchOpen = !globalSearchOpen
@@ -451,38 +466,6 @@ fun ProjectsScreen(
                                     onNavigateToSettings()
                                 },
                                 leadingIcon = { Icon(Icons.Default.Settings, contentDescription = null) }
-                            )
-                            DropdownMenuItem(
-                                text = { Text(s.calendar) },
-                                onClick = {
-                                    projectsMenuExpanded = false
-                                    onNavigateToCalendar()
-                                },
-                                leadingIcon = { Icon(Icons.Default.DateRange, contentDescription = null) }
-                            )
-                            DropdownMenuItem(
-                                text = { Text(s.allTasksHeader(overviewTaskCount)) },
-                                onClick = {
-                                    projectsMenuExpanded = false
-                                    overviewPanel = OverviewPanel.Tasks
-                                },
-                                leadingIcon = { Icon(Icons.Default.CheckCircle, contentDescription = null) }
-                            )
-                            DropdownMenuItem(
-                                text = { Text(s.allHubsHeader(overviewHubCount)) },
-                                onClick = {
-                                    projectsMenuExpanded = false
-                                    overviewPanel = OverviewPanel.Hubs
-                                },
-                                leadingIcon = { Icon(Icons.Default.ViewWeek, contentDescription = null) }
-                            )
-                            DropdownMenuItem(
-                                text = { Text(s.allBoardsHeader(overviewBoardCount)) },
-                                onClick = {
-                                    projectsMenuExpanded = false
-                                    overviewPanel = OverviewPanel.Boards
-                                },
-                                leadingIcon = { Icon(Icons.Default.GridView, contentDescription = null) }
                             )
                             DropdownMenuItem(
                                 text = {
@@ -542,7 +525,7 @@ fun ProjectsScreen(
                             .padding(bottom = 6.dp),
                         singleLine = true,
                         placeholder = { Text(s.searchProjectsPlaceholder) },
-                        shape = RoundedCornerShape(12.dp)
+                        shape = RoundedCornerShape(10.dp)
                     )
                 }
             }
@@ -551,10 +534,10 @@ fun ProjectsScreen(
             Box(
                 modifier = Modifier
                     .widthIn(max = 220.dp)
-                    .shadow(10.dp, CircleShape)
-                    .clip(CircleShape)
-                    .background(newProjectGradient)
-                    .border(1.dp, Color.White.copy(alpha = 0.35f), CircleShape)
+                    .shadow(6.dp, RoundedCornerShape(10.dp))
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(buttonFill())
+                    .border(1.dp, buttonLine(), RoundedCornerShape(10.dp))
                     .clickable { isAddingProject = true }
                     .padding(horizontal = 24.dp, vertical = 16.dp)
             ) {
@@ -562,13 +545,13 @@ fun ProjectsScreen(
                     Icon(
                         Icons.Default.Add,
                         contentDescription = s.createProject,
-                        tint = Color.White,
+                        tint = buttonLabel(),
                         modifier = Modifier.size(24.dp)
                     )
                     Spacer(modifier = Modifier.width(10.dp))
                     Text(
                         s.newProject,
-                        color = Color.White,
+                        color = buttonLabel(),
                         fontWeight = FontWeight.Bold,
                         style = MaterialTheme.typography.titleMedium,
                         maxLines = 1,
@@ -590,7 +573,7 @@ fun ProjectsScreen(
             if (!notificationsGranted && !notifBannerDismissed) {
                 item(key = "notif-banner") {
                     Surface(
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(10.dp),
                         color = MaterialTheme.colorScheme.secondaryContainer,
                         border = androidx.compose.foundation.BorderStroke(
                             1.dp,
@@ -669,7 +652,7 @@ fun ProjectsScreen(
                         onClick = {
                             column?.boardId?.let { onNavigateToBoard(it, column.id) }
                         },
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(10.dp),
                         color = MaterialTheme.colorScheme.primaryContainer,
                         border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)),
                         modifier = Modifier.fillMaxWidth()
@@ -695,7 +678,7 @@ fun ProjectsScreen(
                                 )
                                 Text(
                                     text = focusTask.title,
-                                    style = MaterialTheme.typography.bodyLarge,
+                                    style = MaterialTheme.typography.bodyMedium,
                                     fontWeight = FontWeight.SemiBold,
                                     maxLines = 2,
                                     overflow = TextOverflow.Ellipsis
@@ -708,7 +691,7 @@ fun ProjectsScreen(
                                 Icon(
                                     imageVector = Icons.Outlined.CheckCircle,
                                     contentDescription = s.markDone,
-                                    tint = Color(0xFF00C853),
+                                    tint = completedMark(),
                                     modifier = Modifier.size(26.dp)
                                 )
                             }
@@ -774,6 +757,8 @@ fun ProjectsScreen(
                         onOpenEisenhower = { onNavigateToEisenhower(project.id) },
                         onOpenStats = { onNavigateToStats(project.id) },
                         onOpenAiPrompts = { onNavigateToAiPrompts(project.id) },
+                        onOpenCalendar = { onNavigateToCalendar(project.id) },
+                        onOpenNotes = { onNavigateToNotes(project.id) },
                         onSetDefault = { board ->
                             if (board.isDefault) viewModel.clearDefaultBoard()
                             else viewModel.setDefaultBoard(board.id)
@@ -967,10 +952,9 @@ fun ProjectsScreen(
             AlertDialog(
                 onDismissRequest = { isQuickAdding = false },
                 title = {
-                    Text(
+                    DialogMarqueeText(
                         text = s.quickAddTask,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        maxLines = 2
                     )
                 },
                 text = {
@@ -981,7 +965,7 @@ fun ProjectsScreen(
                             .verticalScroll(rememberScrollState()),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Text(
+                        DialogMarqueeText(
                             text = if (quickTarget != null) {
                                 s.quickAddGoesTo(
                                     s.localized(quickTarget.board.name),
@@ -992,13 +976,18 @@ fun ProjectsScreen(
                             },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 3,
-                            overflow = TextOverflow.Ellipsis
+                            maxLines = 3
                         )
                         OutlinedTextField(
                             value = quickAddTitle,
                             onValueChange = { quickAddTitle = it },
-                            label = { Text(s.newTask, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                            label = {
+                                DialogMarqueeText(
+                                    text = s.newTask,
+                                    maxLines = 1,
+                                    fillMaxWidth = false
+                                )
+                            },
                             singleLine = kairosPrefs.enterAddsTask,
                             maxLines = if (kairosPrefs.enterAddsTask) 1 else 4,
                             keyboardOptions = KeyboardOptions(
@@ -1053,7 +1042,7 @@ fun ProjectsScreen(
         if (isAddingProject) {
             AlertDialog(
                 onDismissRequest = { isAddingProject = false },
-                title = { Text(s.newProject) },
+                title = { DialogMarqueeText(text = s.newProject, fontWeight = FontWeight.Bold, maxLines = 2) },
                 text = {
                     OutlinedTextField(
                         value = newProjectName,
@@ -1079,7 +1068,7 @@ fun ProjectsScreen(
         if (projectToRename != null) {
             AlertDialog(
                 onDismissRequest = { projectToRename = null },
-                title = { Text(s.renameProject) },
+                title = { DialogMarqueeText(text = s.renameProject, fontWeight = FontWeight.Bold, maxLines = 2) },
                 text = {
                     OutlinedTextField(
                         value = renameProjectName,
@@ -1106,7 +1095,7 @@ fun ProjectsScreen(
         if (isAddingBoardToProject != null) {
             AlertDialog(
                 onDismissRequest = { isAddingBoardToProject = null },
-                title = { Text(s.newBoard) },
+                title = { DialogMarqueeText(text = s.newBoard, fontWeight = FontWeight.Bold, maxLines = 2) },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         OutlinedTextField(
@@ -1164,7 +1153,7 @@ fun ProjectsScreen(
         if (boardToRename != null) {
             AlertDialog(
                 onDismissRequest = { boardToRename = null },
-                title = { Text(s.renameBoard) },
+                title = { DialogMarqueeText(text = s.renameBoard, fontWeight = FontWeight.Bold, maxLines = 2) },
                 text = {
                     OutlinedTextField(
                         value = renameBoardName,
@@ -1195,7 +1184,7 @@ fun ProjectsScreen(
                     contactDialogProjectId = null
                     contactToEdit = null
                 },
-                onSave = { name, phone, email, role ->
+                onSave = { name, phone, email, role, social ->
                     val projectId = contactDialogProjectId
                     if (projectId != null) {
                         val existing = contactToEdit
@@ -1205,11 +1194,12 @@ fun ProjectsScreen(
                                     name = name.trim(),
                                     phone = phone.trim(),
                                     email = email.trim(),
-                                    role = role.trim()
+                                    role = role.trim(),
+                                    social = social.trim()
                                 )
                             )
                         } else {
-                            viewModel.addContact(projectId, name, phone, email, role)
+                            viewModel.addContact(projectId, name, phone, email, role, social)
                         }
                     }
                     contactDialogProjectId = null
@@ -1222,17 +1212,19 @@ fun ProjectsScreen(
             val delete = pendingDelete!!
             AlertDialog(
                 onDismissRequest = { pendingDelete = null },
-                title = { Text(delete.title) },
+                title = {
+                    DialogMarqueeText(text = delete.title, fontWeight = FontWeight.Bold, maxLines = 2)
+                },
                 text = {
                     Column {
-                        Text(s.quoted(delete.name))
+                        DialogMarqueeText(text = s.quoted(delete.name), maxLines = 3)
                         if (delete.warnContents) {
                             Spacer(modifier = Modifier.height(8.dp))
-                            Text(s.deleteWithContents)
+                            DialogMarqueeText(text = s.deleteWithContents, maxLines = 4)
                         }
                         if (delete.warnEverywhere) {
                             Spacer(modifier = Modifier.height(8.dp))
-                            Text(s.deleteTaskEverywhere)
+                            DialogMarqueeText(text = s.deleteTaskEverywhere, maxLines = 4)
                         }
                     }
                 },
@@ -1241,7 +1233,7 @@ fun ProjectsScreen(
                         delete.onConfirm()
                         pendingDelete = null
                     }) {
-                        Text(s.delete, color = deleteButtonColor, fontWeight = FontWeight.SemiBold)
+                        Text(s.delete, color = deleteButtonColor(), fontWeight = FontWeight.SemiBold)
                     }
                 },
                 dismissButton = {
@@ -1253,7 +1245,7 @@ fun ProjectsScreen(
         if (showImportConfirm) {
             AlertDialog(
                 onDismissRequest = { showImportConfirm = false },
-                title = { Text(s.importOverwriteTitle) },
+                title = { DialogMarqueeText(text = s.importOverwriteTitle, fontWeight = FontWeight.Bold, maxLines = 2) },
                 text = { Text(s.importOverwriteText) },
                 confirmButton = {
                     TextButton(onClick = {
@@ -1290,6 +1282,8 @@ fun ProjectCard(
     onOpenEisenhower: () -> Unit = {},
     onOpenStats: () -> Unit = {},
     onOpenAiPrompts: () -> Unit = {},
+    onOpenCalendar: () -> Unit = {},
+    onOpenNotes: () -> Unit = {},
     onSetDefault: (Board) -> Unit,
     onRenameProject: () -> Unit,
     onDeleteProject: () -> Unit,
@@ -1317,20 +1311,25 @@ fun ProjectCard(
 ) {
     val s = LocalAppStrings.current
     var menuExpanded by remember { mutableStateOf(false) }
+    var contactsExpanded by remember { mutableStateOf(false) }
+    val sortedContacts = remember(contacts) {
+        val collator = java.text.Collator.getInstance()
+        contacts.sortedWith { a, b -> collator.compare(a.name, b.name) }
+    }
 
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .offset { IntOffset(0, if (isDragging) dragOffsetY.roundToInt() else 0) }
             .zIndex(if (isDragging) 10f else 0f)
-            .shadow(if (isDragging) 10.dp else 0.dp, RoundedCornerShape(8.dp)),
+            .shadow(if (isDragging) 10.dp else 0.dp, RoundedCornerShape(10.dp)),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
         elevation = CardDefaults.cardElevation(defaultElevation = if (isDragging) 6.dp else 0.dp),
         border = androidx.compose.foundation.BorderStroke(
             if (isDragging) 2.dp else 1.2.dp,
             if (isDragging) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)
         ),
-        shape = RoundedCornerShape(8.dp)
+        shape = RoundedCornerShape(10.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             // Project Header
@@ -1358,7 +1357,7 @@ fun ProjectCard(
                             modifier = Modifier
                                 .padding(end = 10.dp)
                                 .size(36.dp)
-                                .clip(RoundedCornerShape(8.dp))
+                                .clip(RoundedCornerShape(10.dp))
                                 .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.5f))
                                 .pointerInput(project.id) {
                                     detectDragGesturesAfterLongPress(
@@ -1459,9 +1458,9 @@ fun ProjectCard(
                             )
                             if (canDeleteProject) {
                                 DropdownMenuItem(
-                                    text = { Text(s.deleteProject, color = deleteButtonColor, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyLarge) },
+                                    text = { Text(s.deleteProject, color = deleteButtonColor(), fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyLarge) },
                                     onClick = { onDeleteProject(); menuExpanded = false },
-                                    leadingIcon = { Icon(Icons.Default.Delete, null, tint = deleteButtonColor, modifier = Modifier.size(22.dp)) }
+                                    leadingIcon = { Icon(Icons.Default.Delete, null, tint = deleteButtonColor(), modifier = Modifier.size(22.dp)) }
                                 )
                             }
                         }
@@ -1490,9 +1489,13 @@ fun ProjectCard(
             }
 
             Spacer(modifier = Modifier.height(6.dp))
-            RecurringProjectRow(onOpen = onOpenRecurring)
+            CalendarProjectRow(onOpen = onOpenCalendar)
+            Spacer(modifier = Modifier.height(2.dp))
+            NotesProjectRow(onOpen = onOpenNotes)
             Spacer(modifier = Modifier.height(2.dp))
             EisenhowerProjectRow(onOpen = onOpenEisenhower)
+            Spacer(modifier = Modifier.height(2.dp))
+            RecurringProjectRow(onOpen = onOpenRecurring)
             Spacer(modifier = Modifier.height(2.dp))
             StatsProjectRow(onOpen = onOpenStats)
             Spacer(modifier = Modifier.height(2.dp))
@@ -1517,43 +1520,70 @@ fun ProjectCard(
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
 
-            Text(
-                text = s.contacts,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-
-            if (contacts.isEmpty()) {
-                Text(
-                    s.noContacts,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable { contactsExpanded = !contactsExpanded }
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = if (contactsExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                    contentDescription = if (contactsExpanded) s.hide else s.show,
+                    modifier = Modifier.size(28.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-            } else {
-                contacts.forEach { contact ->
-                    ContactItem(
-                        contact = contact,
-                        onEdit = { onEditContact(contact) },
-                        onDelete = { onDeleteContact(contact) }
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = s.contacts,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f)
+                )
+                if (contacts.isNotEmpty()) {
+                    Text(
+                        text = contacts.size.toString(),
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            if (contactsExpanded) {
+                Spacer(modifier = Modifier.height(8.dp))
 
-            OutlinedButton(
-                onClick = onAddContact,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp),
-                shape = RoundedCornerShape(10.dp),
-                border = androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary)
-            ) {
-                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(s.addContact, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                if (contacts.isEmpty()) {
+                    Text(
+                        s.noContacts,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    sortedContacts.forEach { contact ->
+                        ContactItem(
+                            contact = contact,
+                            onEdit = { onEditContact(contact) },
+                            onDelete = { onDeleteContact(contact) }
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                OutlinedButton(
+                    onClick = onAddContact,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp),
+                    shape = RoundedCornerShape(10.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary)
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(s.addContact, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                }
             }
             }
         }
@@ -1578,24 +1608,13 @@ private fun RecurringProjectRow(onOpen: () -> Unit) {
             modifier = Modifier.size(22.dp)
         )
         Spacer(modifier = Modifier.width(12.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = s.recurringTitle,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold
-            )
-            Text(
-                text = s.recurringRowHint,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-        Icon(
-            imageVector = Icons.Default.KeyboardArrowRight,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant
+        Text(
+            text = s.recurringTitle,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.weight(1f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
         )
     }
 }
@@ -1618,24 +1637,13 @@ private fun EisenhowerProjectRow(onOpen: () -> Unit) {
             modifier = Modifier.size(22.dp)
         )
         Spacer(modifier = Modifier.width(12.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = s.eisenhowerMatrixTitle,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold
-            )
-            Text(
-                text = s.eisenhowerRowHint,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-        Icon(
-            imageVector = Icons.Default.KeyboardArrowRight,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant
+        Text(
+            text = s.eisenhowerMatrixTitle,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.weight(1f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
         )
     }
 }
@@ -1658,24 +1666,13 @@ private fun StatsProjectRow(onOpen: () -> Unit) {
             modifier = Modifier.size(22.dp)
         )
         Spacer(modifier = Modifier.width(12.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = s.statsTitle,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold
-            )
-            Text(
-                text = s.statsRowHint,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-        Icon(
-            imageVector = Icons.Default.KeyboardArrowRight,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant
+        Text(
+            text = s.statsTitle,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.weight(1f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
         )
     }
 }
@@ -1698,26 +1695,71 @@ private fun AiPromptsProjectRow(onOpen: () -> Unit) {
             modifier = Modifier.size(22.dp)
         )
         Spacer(modifier = Modifier.width(12.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = s.aiPromptsTitle,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                text = s.aiPromptsRowHint,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
+        Text(
+            text = s.aiPromptsTitle,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.weight(1f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+@Composable
+private fun NotesProjectRow(onOpen: () -> Unit) {
+    val s = LocalAppStrings.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(onClick = onOpen)
+            .padding(vertical = 10.dp, horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
         Icon(
-            imageVector = Icons.Default.KeyboardArrowRight,
+            imageVector = Icons.Default.AutoStories,
             contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(22.dp)
+        )
+        Spacer(modifier = Modifier.width(12.dp))
+        Text(
+            text = s.notes,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.weight(1f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+@Composable
+private fun CalendarProjectRow(onOpen: () -> Unit) {
+    val s = LocalAppStrings.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(onClick = onOpen)
+            .padding(vertical = 10.dp, horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = Icons.Default.DateRange,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(22.dp)
+        )
+        Spacer(modifier = Modifier.width(12.dp))
+        Text(
+            text = s.calendar,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.weight(1f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
         )
     }
 }
@@ -1750,7 +1792,7 @@ fun BoardItem(
                 modifier = Modifier
                     .size(24.dp)
                     .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(4.dp))
-                    .border(1.2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.45f), RoundedCornerShape(4.dp)),
+                    .border(1.2.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(4.dp)),
                 contentAlignment = Alignment.Center
             ) {
                 Row(
@@ -1758,9 +1800,9 @@ fun BoardItem(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.padding(3.dp)
                 ) {
-                    Box(modifier = Modifier.width(3.dp).height(12.dp).background(MaterialTheme.colorScheme.primary, RoundedCornerShape(1.dp)))
-                    Box(modifier = Modifier.width(3.dp).height(8.dp).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.6f), RoundedCornerShape(1.dp)))
-                    Box(modifier = Modifier.width(3.dp).height(10.dp).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.4f), RoundedCornerShape(1.dp)))
+                    Box(modifier = Modifier.width(3.dp).height(12.dp).background(MaterialTheme.colorScheme.onSurface, RoundedCornerShape(1.dp)))
+                    Box(modifier = Modifier.width(3.dp).height(8.dp).background(MaterialTheme.colorScheme.onSurface, RoundedCornerShape(1.dp)))
+                    Box(modifier = Modifier.width(3.dp).height(10.dp).background(MaterialTheme.colorScheme.onSurface, RoundedCornerShape(1.dp)))
                 }
             }
             Spacer(modifier = Modifier.width(12.dp))
@@ -1768,7 +1810,8 @@ fun BoardItem(
                 Text(
                     text = s.localized(board.name),
                     style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Medium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -1824,9 +1867,9 @@ fun BoardItem(
                 )
                 if (canDelete) {
                     DropdownMenuItem(
-                        text = { Text(s.deleteBoard, color = deleteButtonColor, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyLarge) },
+                        text = { Text(s.deleteBoard, color = deleteButtonColor(), fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyLarge) },
                         onClick = { onDelete(); boardMenuExpanded = false },
-                        leadingIcon = { Icon(Icons.Default.Delete, null, tint = deleteButtonColor, modifier = Modifier.size(22.dp)) }
+                        leadingIcon = { Icon(Icons.Default.Delete, null, tint = deleteButtonColor(), modifier = Modifier.size(22.dp)) }
                     )
                 }
             }
@@ -1843,6 +1886,7 @@ fun ContactItem(
     val context = LocalContext.current
     val s = LocalAppStrings.current
     var menuExpanded by remember { mutableStateOf(false) }
+    var showWrite by remember { mutableStateOf(false) }
     val initial = contact.name.firstOrNull()?.uppercaseChar()?.toString() ?: "?"
 
     Row(
@@ -1884,7 +1928,7 @@ fun ContactItem(
                     overflow = TextOverflow.Ellipsis
                 )
             }
-            val details = listOf(contact.phone, contact.email).filter { it.isNotBlank() }
+            val details = listOf(contact.phone, contact.social, contact.email).filter { it.isNotBlank() }
             if (details.isNotEmpty()) {
                 Text(
                     text = details.joinToString(" · "),
@@ -1894,6 +1938,17 @@ fun ContactItem(
                     overflow = TextOverflow.Ellipsis
                 )
             }
+        }
+        IconButton(
+            onClick = { showWrite = true },
+            modifier = Modifier.size(40.dp)
+        ) {
+            Icon(
+                Icons.AutoMirrored.Filled.Chat,
+                contentDescription = s.cardWrite,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(20.dp)
+            )
         }
         if (contact.phone.isNotBlank()) {
             IconButton(
@@ -1940,12 +1995,15 @@ fun ContactItem(
                     leadingIcon = { Icon(Icons.Default.Edit, null, modifier = Modifier.size(22.dp)) }
                 )
                 DropdownMenuItem(
-                    text = { Text(s.deleteContact, color = deleteButtonColor, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyLarge) },
+                    text = { Text(s.deleteContact, color = deleteButtonColor(), fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyLarge) },
                     onClick = { onDelete(); menuExpanded = false },
-                    leadingIcon = { Icon(Icons.Default.Delete, null, tint = deleteButtonColor, modifier = Modifier.size(22.dp)) }
+                    leadingIcon = { Icon(Icons.Default.Delete, null, tint = deleteButtonColor(), modifier = Modifier.size(22.dp)) }
                 )
             }
         }
+    }
+    if (showWrite) {
+        ContactWriteDialog(contact = contact, onDismiss = { showWrite = false })
     }
 }
 
@@ -1953,17 +2011,24 @@ fun ContactItem(
 fun ContactDialog(
     contact: Contact?,
     onDismiss: () -> Unit,
-    onSave: (name: String, phone: String, email: String, role: String) -> Unit
+    onSave: (name: String, phone: String, email: String, role: String, social: String) -> Unit
 ) {
     val s = LocalAppStrings.current
     var name by remember { mutableStateOf(contact?.name.orEmpty()) }
     var role by remember { mutableStateOf(contact?.role.orEmpty()) }
     var phone by remember { mutableStateOf(contact?.phone.orEmpty()) }
     var email by remember { mutableStateOf(contact?.email.orEmpty()) }
+    var social by remember { mutableStateOf(contact?.social.orEmpty()) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (contact == null) s.newContact else s.editContact) },
+        title = {
+            DialogMarqueeText(
+                text = if (contact == null) s.newContact else s.editContact,
+                fontWeight = FontWeight.Bold,
+                maxLines = 2
+            )
+        },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedTextField(
@@ -1997,11 +2062,18 @@ fun ContactDialog(
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
                     modifier = Modifier.fillMaxWidth()
                 )
+                OutlinedTextField(
+                    value = social,
+                    onValueChange = { social = it },
+                    label = { Text(s.cardSocial) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
         },
         confirmButton = {
             TextButton(
-                onClick = { onSave(name, phone, email, role) },
+                onClick = { onSave(name, phone, email, role, social) },
                 enabled = name.isNotBlank()
             ) { Text(if (contact == null) s.add else s.save) }
         },
@@ -2041,6 +2113,8 @@ private fun OverviewPanelDialog(
     dateLocale: java.util.Locale
 ) {
     val s = LocalAppStrings.current
+    val context = LocalContext.current
+    val prefs = remember { KairosPreferences(context) }
     val title = when (panel) {
         OverviewPanel.Tasks -> s.allTasksHeader(allTasks.size)
         OverviewPanel.Hubs -> s.allHubsHeader(allHubs.size)
@@ -2049,11 +2123,10 @@ private fun OverviewPanelDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
-            Text(
+            DialogMarqueeText(
                 text = title,
                 fontWeight = FontWeight.Bold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+                maxLines = 2
             )
         },
         text = {
@@ -2073,7 +2146,7 @@ private fun OverviewPanelDialog(
                                     modifier = Modifier.fillMaxWidth(),
                                     singleLine = true,
                                     placeholder = { Text(s.searchTasks) },
-                                    shape = RoundedCornerShape(12.dp)
+                                    shape = RoundedCornerShape(10.dp)
                                 )
                                 Row(
                                     modifier = Modifier
@@ -2125,7 +2198,14 @@ private fun OverviewPanelDialog(
                                 OverviewTaskRow(
                                     task = task,
                                     location = location,
-                                    dueDateLabel = task.dueDate?.relativeDueLabel(s, dateLocale, task.isCompleted).orEmpty(),
+                                    dueDateLabel = task.dueDate?.relativeDueLabel(
+                                        s,
+                                        dateLocale,
+                                        task.isCompleted,
+                                        reminderMinutesOfDay = task.startMinutesOfDay ?: task.reminderMinutesOfDay,
+                                        defaultReminderMinutes = prefs.reminderMinutesOfDay,
+                                        markOverdue = task.isPastDeadline()
+                                    ).orEmpty(),
                                     linkedBoardCount = extraBoardCount(task, state.columns, state.boards),
                                     onToggleCompleted = { onCompleteTask(task) },
                                     onOpen = {
@@ -2233,7 +2313,7 @@ private fun OverviewDeletableRow(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        shape = RoundedCornerShape(8.dp)
+        shape = RoundedCornerShape(10.dp)
     ) {
         Row(
             modifier = Modifier
@@ -2243,20 +2323,18 @@ private fun OverviewDeletableRow(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text(
+                DialogMarqueeText(
                     text = title,
                     style = MaterialTheme.typography.bodyLarge,
                     fontWeight = FontWeight.Medium,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
+                    maxLines = 2
                 )
                 if (subtitle.isNotBlank()) {
-                    Text(
+                    DialogMarqueeText(
                         text = subtitle,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        maxLines = 1
                     )
                 }
             }
@@ -2265,7 +2343,7 @@ private fun OverviewDeletableRow(
                     Icon(
                         imageVector = Icons.Default.Delete,
                         contentDescription = s.delete,
-                        tint = deleteButtonColor,
+                        tint = deleteButtonColor(),
                         modifier = Modifier.size(22.dp)
                     )
                 }
@@ -2297,7 +2375,7 @@ private fun OverviewTaskRow(
             }
         ),
         border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        shape = RoundedCornerShape(8.dp)
+        shape = RoundedCornerShape(10.dp)
     ) {
         Row(
             modifier = Modifier
@@ -2309,18 +2387,18 @@ private fun OverviewTaskRow(
             Icon(
                 imageVector = if (task.isCompleted) Icons.Filled.CheckCircle else Icons.Outlined.CheckCircle,
                 contentDescription = s.completed,
-                tint = if (task.isCompleted) Color(0xFF00C853) else MaterialTheme.colorScheme.outlineVariant,
+                tint = if (task.isCompleted) completedMark() else MaterialTheme.colorScheme.outlineVariant,
                 modifier = Modifier.size(24.dp)
             )
         }
         Column(modifier = Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
+                DialogMarqueeText(
                     text = task.title,
-                    style = MaterialTheme.typography.bodyLarge,
+                    style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Medium,
                     maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
+                    fillMaxWidth = false,
                     color = if (task.isCompleted) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
                     textDecoration = if (task.isCompleted) TextDecoration.LineThrough else TextDecoration.None,
                     modifier = Modifier.weight(1f, fill = false)
@@ -2330,7 +2408,7 @@ private fun OverviewTaskRow(
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
+                            .clip(RoundedCornerShape(10.dp))
                             .background(MaterialTheme.colorScheme.secondaryContainer)
                             .padding(horizontal = 6.dp, vertical = 2.dp)
                     ) {
@@ -2351,16 +2429,15 @@ private fun OverviewTaskRow(
                 }
             }
             if (location.isNotBlank()) {
-                Text(
+                DialogMarqueeText(
                     text = location,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    maxLines = 1
                 )
             }
             if (dueDateLabel.isNotBlank()) {
-                val overdue = !task.isCompleted && task.dueDate != null && task.dueDate.isOverdueDate()
+                val overdue = task.isPastDeadline()
                 Text(
                     text = dueDateLabel,
                     style = MaterialTheme.typography.labelSmall,
@@ -2380,7 +2457,7 @@ private fun OverviewTaskRow(
             Icon(
                 imageVector = Icons.Default.Delete,
                 contentDescription = s.deleteTask,
-                tint = deleteButtonColor,
+                tint = deleteButtonColor(),
                 modifier = Modifier.size(22.dp)
             )
         }
@@ -2393,27 +2470,22 @@ private fun extraBoardCount(
     columns: List<Column>,
     boards: List<Board>
 ): Int {
-    val boardIds = linkedMutableSetOfBoards(task, columns, boards)
-    return (boardIds.size - 1).coerceAtLeast(0)
+    val homeBoardId = columns.find { it.id == task.columnId }?.boardId
+    return linkedMutableSetOfBoards(task, columns).count { id ->
+        if (id == homeBoardId) return@count false
+        val name = boards.find { it.id == id }?.name
+        !KanbanNames.isEisenhowerBoard(name)
+    }
 }
 
 private fun linkedMutableSetOfBoards(
     task: Task,
-    columns: List<Column>,
-    boards: List<Board>
+    columns: List<Column>
 ): Set<String> {
     val ids = mutableSetOf<String>()
     columns.find { it.id == task.columnId }?.boardId?.let { ids += it }
     task.linkedColumnIds.forEach { linkId ->
         columns.find { it.id == linkId }?.boardId?.let { ids += it }
-    }
-    if (task.eisenhowerQuadrant != null) {
-        val homeProjectId = columns.find { it.id == task.columnId }
-            ?.let { col -> boards.find { it.id == col.boardId }?.projectId }
-        boards.filter {
-            KanbanNames.isEisenhowerBoard(it.name) &&
-                (homeProjectId == null || it.projectId == homeProjectId)
-        }.forEach { ids += it.id }
     }
     return ids
 }
@@ -2426,7 +2498,7 @@ fun DeveloperContactsCard() {
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         border = androidx.compose.foundation.BorderStroke(1.2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)),
-        shape = RoundedCornerShape(8.dp)
+        shape = RoundedCornerShape(10.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(

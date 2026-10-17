@@ -44,7 +44,7 @@ data class Task(
     val linkedColumnIds: List<String> = emptyList(),
     /** null | daily | weekly (legacy; UI hidden, auto-spawn disabled) */
     val repeatRule: String? = null,
-    /** Minutes from midnight; null = use app default reminder time */
+    /** Minutes from midnight; null = use app default reminder when a due date is set. */
     val reminderMinutesOfDay: Int? = null,
     /** Set when spawned from a project recurring template */
     val recurringTemplateId: String? = null,
@@ -65,13 +65,29 @@ data class Task(
     /** When set on a goal, older completed steps no longer count in that goal’s progress. */
     val goalStatsEpochMillis: Long? = null,
     /** Optional visual group inside a hub; same id = same block. */
-    val hubGroupId: String? = null
+    val hubGroupId: String? = null,
+    /**
+     * When to start, minutes from midnight.
+     * Null = app default (settings). If still null, the reminder clock is used for display.
+     */
+    val startMinutesOfDay: Int? = null,
+    /** Latest day. Null = the start day ([dueDate]) is the deadline. */
+    val deadlineAt: Long? = null,
+    /** Countdown minutes started from the card button. Null / 0 = no timer. */
+    val timerMinutes: Int? = null,
+    /** plain | workout | shop | meet. Inner rows live in [cardPayload]. */
+    val cardType: String = TaskCardKind.PLAIN,
+    /** JSON body for [cardType]. Empty for a plain card. */
+    val cardPayload: String = ""
 ) {
     fun isOnColumn(columnId: String): Boolean =
         this.columnId == columnId || linkedColumnIds.contains(columnId)
 
     val isNotDone: Boolean
         get() = !isCompleted && workflowStatus == TaskWorkflow.NOT_DONE
+
+    val showsTimerAction: Boolean
+        get() = !isCompleted && !isNotDone && (timerMinutes ?: 0) > 0
 }
 
 /** Snapshot kept after hard-delete from Archive so Review history survives. */
@@ -92,11 +108,26 @@ data class StatsJournalEntry(
     /** Goal ids this entry contributed to (comma-separated in DB). */
     val relatedGoalIds: List<String> = emptyList(),
     val recurringTemplateId: String? = null,
-    val createdAt: Long
+    val createdAt: Long,
+    /** Parents this task had when it was cleared. Empty on older journal rows. */
+    val parentIds: List<String> = emptyList(),
+    /** Children this task had when it was cleared. */
+    val childIds: List<String> = emptyList(),
+    val isGoal: Boolean = false,
+    val goalStatsEpochMillis: Long? = null,
+    val dueDate: Long? = null,
+    val deadlineAt: Long? = null,
+    val taskCreatedAt: Long = 0L,
+    /**
+     * True when this row should stand in for the deleted task in every stat.
+     * Older rows stay flat ghosts and do not rebuild the tree.
+     */
+    val replacesTask: Boolean = false
 ) {
     companion object {
         const val KIND_DONE = "done"
         const val KIND_NOT_DONE = "not_done"
+        const val KIND_OPEN = "open"
     }
 }
 
@@ -130,8 +161,8 @@ data class RecurringTemplate(
     val targetBoardId: String,
     val targetColumnId: String,
     val enabled: Boolean = true,
-    /** Minutes from midnight; each value → one instance that day */
-    val reminderTimesOfDay: List<Int> = listOf(9 * 60),
+    /** Minutes from midnight; each value → one instance whose start time and reminder time are this clock. Create time is settings-only. */
+    val reminderTimesOfDay: List<Int> = listOf(TaskReminderDefaults.DEFAULT_MINUTES),
     val eisenhowerQuadrant: String? = null,
     val showEisenhowerButtons: Boolean = false,
     /** Parent goals applied to each spawned instance. */
@@ -145,7 +176,27 @@ data class RecurringTemplate(
      * (user deleted the hub instance). Prevents same-day respawn.
      */
     val skippedOccurrenceKeys: List<String> = emptyList(),
-    val createdAt: Long
+    /**
+     * Local start-of-day millis from which instances may be created.
+     * 0 / unset → treat as start of [createdAt]'s day (legacy).
+     */
+    val startsOnDayMillis: Long = 0L,
+    /** Days after the instance start. Together with [deadlineOffsetHours]. Null = no deadline. */
+    val deadlineOffsetDays: Int? = null,
+    /** Hours after the instance start, added to [deadlineOffsetDays]. */
+    val deadlineOffsetHours: Int? = null,
+    val createdAt: Long,
+    /** Notify this long before each habit reminder slot. */
+    val remindLeadAmount: Int? = null,
+    /** [com.example.kaizenkanban.domain.model.RemindLeadUnit] id. */
+    val remindLeadUnit: String? = null,
+    /** Countdown minutes copied onto each spawned instance. Null / 0 = no timer. */
+    val timerMinutes: Int? = null,
+    /** Copied onto each spawned instance as [Task.hubGroupId]. */
+    val hubGroupId: String? = null,
+    /** Copied onto each spawned instance. Checks start cleared. */
+    val cardType: String = TaskCardKind.PLAIN,
+    val cardPayload: String = ""
 )
 
 object RecurringRhythm {
@@ -155,6 +206,48 @@ object RecurringRhythm {
     const val WEEKDAYS = "weekdays"
     /** Interval in days stored in [RecurringTemplate.timesPerWeek]. */
     const val EVERY_N_DAYS = "every_n_days"
+    const val INTERVAL_MIN = 1
+    const val INTERVAL_MAX = 999
+
+    /** Any day count in [INTERVAL_MIN]..[INTERVAL_MAX]. Missing value stays 2. */
+    fun intervalDays(raw: Int?): Int = (raw ?: 2).coerceIn(INTERVAL_MIN, INTERVAL_MAX)
+}
+
+/** Defaults for task due-date reminders (not recurring spawn). */
+object TaskReminderDefaults {
+    /** 09:00 — used when a task has a due date and no custom reminder. */
+    const val DEFAULT_MINUTES = 9 * 60
+}
+
+/** Defaults for recurring template spawn (create) times — settings only, not per-template. */
+object RecurringDefaults {
+    /** 03:30 — when instances appear on the hub if none set in Settings. */
+    const val DEFAULT_SPAWN_MINUTES = 3 * 60 + 30
+
+    @Deprecated(
+        "Spawn time, not reminder — use DEFAULT_SPAWN_MINUTES",
+        ReplaceWith("RecurringDefaults.DEFAULT_SPAWN_MINUTES")
+    )
+    const val DEFAULT_REMINDER_MINUTES = DEFAULT_SPAWN_MINUTES
+
+    /**
+     * Template reminder slots. Legacy sole value [DEFAULT_SPAWN_MINUTES] was create-time
+     * and is treated as unset → [reminderDefault].
+     */
+    fun effectiveReminderTimes(
+        stored: List<Int>,
+        reminderDefault: Int = TaskReminderDefaults.DEFAULT_MINUTES
+    ): List<Int> {
+        val raw = stored
+            .map { it.coerceIn(0, 24 * 60 - 1) }
+            .distinct()
+            .sorted()
+        val fallback = reminderDefault.coerceIn(0, 24 * 60 - 1)
+        if (raw.isEmpty() || raw == listOf(DEFAULT_SPAWN_MINUTES)) {
+            return listOf(fallback)
+        }
+        return raw
+    }
 }
 
 data class Comment(
@@ -178,7 +271,9 @@ data class Contact(
     val phone: String = "",
     val email: String = "",
     val role: String = "",
-    val position: Int = 0
+    val position: Int = 0,
+    /** Telegram, Instagram, or another link from the phone book. */
+    val social: String = ""
 )
 
 /** Directed edge: [parentId] is a goal/container, [childId] is a step under it. */

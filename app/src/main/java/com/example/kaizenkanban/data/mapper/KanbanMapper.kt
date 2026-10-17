@@ -46,7 +46,12 @@ fun TaskEntity.toDomain() = Task(
     statsExcluded = statsExcluded,
     isGoal = isGoal,
     goalStatsEpochMillis = goalStatsEpochMillis,
-    hubGroupId = hubGroupId
+    hubGroupId = hubGroupId,
+    startMinutesOfDay = startMinutesOfDay?.coerceIn(0, 23 * 60 + 59),
+    deadlineAt = deadlineAt,
+    timerMinutes = timerMinutes?.takeIf { it > 0 },
+    cardType = TaskCardKind.normalize(cardType),
+    cardPayload = cardPayload
 )
 
 fun Task.toEntity() = TaskEntity(
@@ -75,7 +80,12 @@ fun Task.toEntity() = TaskEntity(
     statsExcluded = statsExcluded,
     isGoal = isGoal,
     goalStatsEpochMillis = goalStatsEpochMillis,
-    hubGroupId = hubGroupId
+    hubGroupId = hubGroupId,
+    startMinutesOfDay = startMinutesOfDay?.coerceIn(0, 23 * 60 + 59),
+    deadlineAt = deadlineAt,
+    timerMinutes = timerMinutes?.takeIf { it > 0 },
+    cardType = TaskCardKind.normalize(cardType),
+    cardPayload = cardPayload
 )
 
 fun StatsJournalEntity.toDomain() = StatsJournalEntry(
@@ -93,7 +103,15 @@ fun StatsJournalEntity.toDomain() = StatsJournalEntry(
     towardGoal = towardGoal,
     relatedGoalIds = relatedGoalIds.split(',').map { it.trim() }.filter { it.isNotEmpty() },
     recurringTemplateId = recurringTemplateId,
-    createdAt = createdAt
+    createdAt = createdAt,
+    parentIds = parentIds.split(',').map { it.trim() }.filter { it.isNotEmpty() },
+    childIds = childIds.split(',').map { it.trim() }.filter { it.isNotEmpty() },
+    isGoal = isGoal,
+    goalStatsEpochMillis = goalStatsEpochMillis,
+    dueDate = dueDate,
+    deadlineAt = deadlineAt,
+    taskCreatedAt = taskCreatedAt,
+    replacesTask = replacesTask
 )
 
 fun StatsJournalEntry.toEntity() = StatsJournalEntity(
@@ -111,7 +129,15 @@ fun StatsJournalEntry.toEntity() = StatsJournalEntity(
     towardGoal = towardGoal,
     relatedGoalIds = relatedGoalIds.joinToString(","),
     recurringTemplateId = recurringTemplateId,
-    createdAt = createdAt
+    createdAt = createdAt,
+    parentIds = parentIds.joinToString(","),
+    childIds = childIds.joinToString(","),
+    isGoal = isGoal,
+    goalStatsEpochMillis = goalStatsEpochMillis,
+    dueDate = dueDate,
+    deadlineAt = deadlineAt,
+    taskCreatedAt = taskCreatedAt,
+    replacesTask = replacesTask
 )
 
 fun String.toWeekdaySet(): Set<Int> =
@@ -129,7 +155,7 @@ fun String.toMinutesList(): List<Int> =
 
 fun List<Int>.toMinutesStorage(): String =
     map { it.coerceIn(0, 24 * 60 - 1) }.distinct().sorted().joinToString(",")
-        .ifBlank { "540" }
+        .ifBlank { TaskReminderDefaults.DEFAULT_MINUTES.toString() }
 
 fun RecurringTemplateEntity.toDomain(): RecurringTemplate {
     val storedWeekdays = weekdays.toWeekdaySet()
@@ -150,7 +176,7 @@ fun RecurringTemplateEntity.toDomain(): RecurringTemplate {
             Triple(
                 RecurringRhythm.EVERY_N_DAYS,
                 emptySet(),
-                (timesPerWeek ?: 2).coerceIn(2, 30)
+                RecurringRhythm.intervalDays(timesPerWeek)
             )
         else ->
             Triple(RecurringRhythm.DAILY, emptySet(), null)
@@ -165,14 +191,26 @@ fun RecurringTemplateEntity.toDomain(): RecurringTemplate {
         targetBoardId = targetBoardId,
         targetColumnId = targetColumnId,
         enabled = enabled,
-        reminderTimesOfDay = reminderTimesOfDay.toMinutesList().ifEmpty { listOf(9 * 60) },
+        reminderTimesOfDay = RecurringDefaults.effectiveReminderTimes(
+            stored = reminderTimesOfDay.toMinutesList(),
+            reminderDefault = TaskReminderDefaults.DEFAULT_MINUTES
+        ),
         eisenhowerQuadrant = eisenhowerQuadrant,
         showEisenhowerButtons = showEisenhowerButtons || eisenhowerQuadrant != null,
         linkParentIds = linkParentIds.toIdList(),
         linkChildIds = linkChildIds.toIdList(),
         complexity = complexity?.coerceIn(1, 5),
         skippedOccurrenceKeys = skippedOccurrenceKeys.toIdList(),
-        createdAt = createdAt
+        startsOnDayMillis = startsOnDayMillis,
+        deadlineOffsetDays = deadlineOffsetDays?.takeIf { (it > 0) || (deadlineOffsetHours ?: 0) > 0 },
+        deadlineOffsetHours = deadlineOffsetHours?.takeIf { (it > 0) || (deadlineOffsetDays ?: 0) > 0 },
+        createdAt = createdAt,
+        remindLeadAmount = remindLeadAmount?.takeIf { it > 0 },
+        remindLeadUnit = remindLeadUnit,
+        timerMinutes = timerMinutes?.takeIf { it > 0 },
+        hubGroupId = hubGroupId?.takeIf { it.isNotBlank() },
+        cardType = TaskCardKind.normalize(cardType),
+        cardPayload = cardPayload
     )
 }
 
@@ -186,7 +224,7 @@ fun RecurringTemplate.toEntity() = RecurringTemplateEntity(
         else -> RecurringRhythm.DAILY
     },
     timesPerWeek = if (rhythm == RecurringRhythm.EVERY_N_DAYS) {
-        (timesPerWeek ?: 2).coerceIn(2, 30)
+        RecurringRhythm.intervalDays(timesPerWeek)
     } else {
         null
     },
@@ -201,7 +239,100 @@ fun RecurringTemplate.toEntity() = RecurringTemplateEntity(
     linkChildIds = linkChildIds.toIdStorage(),
     complexity = complexity?.coerceIn(1, 5),
     skippedOccurrenceKeys = skippedOccurrenceKeys.toIdStorage(),
+    startsOnDayMillis = startsOnDayMillis,
+    deadlineOffsetDays = deadlineOffsetDays?.coerceAtLeast(0),
+    deadlineOffsetHours = deadlineOffsetHours?.coerceAtLeast(0),
+    createdAt = createdAt,
+    remindLeadAmount = remindLeadAmount?.takeIf { it > 0 },
+    remindLeadUnit = remindLeadUnit,
+    timerMinutes = timerMinutes?.takeIf { it > 0 },
+    hubGroupId = hubGroupId?.takeIf { it.isNotBlank() },
+    cardType = TaskCardKind.normalize(cardType),
+    cardPayload = cardPayload
+)
+
+fun KairosReminderEntity.toDomain() = com.example.kaizenkanban.domain.model.KairosReminder(
+    id = id,
+    projectId = projectId,
+    text = text,
+    triggerAtMillis = triggerAtMillis,
+    taskId = taskId,
+    recurringTemplateId = recurringTemplateId,
+    leadAmount = leadAmount,
+    leadUnit = leadUnit,
     createdAt = createdAt
+)
+
+fun com.example.kaizenkanban.domain.model.KairosReminder.toEntity() = KairosReminderEntity(
+    id = id,
+    projectId = projectId,
+    text = text,
+    triggerAtMillis = triggerAtMillis,
+    taskId = taskId,
+    recurringTemplateId = recurringTemplateId,
+    leadAmount = leadAmount,
+    leadUnit = leadUnit,
+    createdAt = createdAt
+)
+
+fun ProjectNoteEntity.toDomain() = ProjectNote(
+    id = id,
+    projectId = projectId,
+    body = body,
+    createdAt = createdAt,
+    updatedAt = updatedAt,
+    position = position,
+    pinned = pinned,
+    linkedTaskId = linkedTaskId,
+    reminderAtMillis = reminderAtMillis,
+    title = title
+)
+
+fun ProjectNote.toEntity() = ProjectNoteEntity(
+    id = id,
+    projectId = projectId,
+    body = body,
+    createdAt = createdAt,
+    updatedAt = updatedAt,
+    position = position,
+    pinned = pinned,
+    linkedTaskId = linkedTaskId,
+    reminderAtMillis = reminderAtMillis,
+    title = title
+)
+
+fun NoteLineEntity.toDomain() = NoteLine(
+    id = id,
+    noteId = noteId,
+    text = text,
+    createdAt = createdAt,
+    position = position
+)
+
+fun NoteLine.toEntity() = NoteLineEntity(
+    id = id,
+    noteId = noteId,
+    text = text,
+    createdAt = createdAt,
+    position = position
+)
+
+fun NotePhotoEntity.toDomain() = NotePhoto(
+    id = id,
+    noteId = noteId,
+    mediaUri = mediaUri,
+    createdAt = createdAt,
+    sortOrder = sortOrder,
+    lineId = lineId
+)
+
+fun NotePhoto.toEntity() = NotePhotoEntity(
+    id = id,
+    noteId = noteId,
+    mediaUri = mediaUri,
+    createdAt = createdAt,
+    sortOrder = sortOrder,
+    lineId = lineId
 )
 
 private fun String.toIdList(): List<String> =
@@ -226,8 +357,8 @@ fun Comment.toEntity() = CommentEntity(id, taskId, text, createdAt)
 fun ColumnCommentEntity.toDomain() = ColumnComment(id, columnId, text, createdAt)
 fun ColumnComment.toEntity() = ColumnCommentEntity(id, columnId, text, createdAt)
 
-fun ContactEntity.toDomain() = Contact(id, projectId, name, phone, email, role, position)
-fun Contact.toEntity() = ContactEntity(id, projectId, name, phone, email, role, position)
+fun ContactEntity.toDomain() = Contact(id, projectId, name, phone, email, role, position, social)
+fun Contact.toEntity() = ContactEntity(id, projectId, name, phone, email, role, position, social)
 
 fun TaskLinkEntity.toDomain() = TaskLink(parentId, childId, createdAt)
 fun TaskLink.toEntity() = TaskLinkEntity(parentId, childId, createdAt)

@@ -61,7 +61,13 @@ data class TaskEntity(
     val statsExcluded: Boolean = false,
     val isGoal: Boolean = false,
     val goalStatsEpochMillis: Long? = null,
-    val hubGroupId: String? = null
+    val hubGroupId: String? = null,
+    val startMinutesOfDay: Int? = null,
+    val deadlineAt: Long? = null,
+    val timerMinutes: Int? = null,
+    /** plain | workout | shop | meet */
+    val cardType: String = "plain",
+    val cardPayload: String = ""
 )
 
 @Entity(tableName = "stats_journal")
@@ -81,7 +87,15 @@ data class StatsJournalEntity(
     /** Comma-separated goal task ids this entry counts toward. */
     val relatedGoalIds: String = "",
     val recurringTemplateId: String? = null,
-    val createdAt: Long
+    val createdAt: Long,
+    val parentIds: String = "",
+    val childIds: String = "",
+    val isGoal: Boolean = false,
+    val goalStatsEpochMillis: Long? = null,
+    val dueDate: Long? = null,
+    val deadlineAt: Long? = null,
+    val taskCreatedAt: Long = 0L,
+    val replacesTask: Boolean = false
 )
 
 @Entity(tableName = "recurring_templates")
@@ -97,7 +111,7 @@ data class RecurringTemplateEntity(
     val targetBoardId: String,
     val targetColumnId: String,
     val enabled: Boolean = true,
-    /** Comma-separated minutes from midnight, e.g. "540,900,1260" */
+    /** Comma-separated reminder minutes from midnight, e.g. "540,900,1260" */
     val reminderTimesOfDay: String = "540",
     val eisenhowerQuadrant: String? = null,
     val showEisenhowerButtons: Boolean = false,
@@ -108,7 +122,74 @@ data class RecurringTemplateEntity(
     val complexity: Int? = null,
     /** Comma-separated `"dayStart:minutes"` keys for dismissed occurrences */
     val skippedOccurrenceKeys: String = "",
+    /**
+     * Local start-of-day millis; instances spawn only on/after this day.
+     * 0 = legacy (use createdAt's day).
+     */
+    val startsOnDayMillis: Long = 0L,
+    /** Days after each instance start. Combined with [deadlineOffsetHours]. Null = no deadline. */
+    val deadlineOffsetDays: Int? = null,
+    /** Hours after each instance start, added on top of [deadlineOffsetDays]. */
+    val deadlineOffsetHours: Int? = null,
+    val createdAt: Long,
+    /** Lead before each habit reminder slot. Null = no extra reminder. */
+    val remindLeadAmount: Int? = null,
+    /** hour | day | week | month */
+    val remindLeadUnit: String? = null,
+    /** Countdown minutes copied onto each spawned instance. */
+    val timerMinutes: Int? = null,
+    /** Shared with spawned hub tasks so a habit group stays one block. */
+    val hubGroupId: String? = null,
+    /** plain | workout | shop | meet. Copied onto each instance. */
+    val cardType: String = "plain",
+    val cardPayload: String = ""
+)
+
+@Entity(tableName = "kairos_reminders")
+data class KairosReminderEntity(
+    @PrimaryKey val id: String,
+    val projectId: String,
+    val text: String,
+    val triggerAtMillis: Long,
+    val taskId: String? = null,
+    val recurringTemplateId: String? = null,
+    val leadAmount: Int? = null,
+    val leadUnit: String? = null,
     val createdAt: Long
+)
+
+@Entity(tableName = "project_notes")
+data class ProjectNoteEntity(
+    @PrimaryKey val id: String,
+    val projectId: String,
+    val body: String,
+    val createdAt: Long,
+    val updatedAt: Long,
+    val position: Int = 0,
+    val pinned: Boolean = false,
+    val linkedTaskId: String? = null,
+    val reminderAtMillis: Long? = null,
+    val title: String = ""
+)
+
+@Entity(tableName = "note_lines")
+data class NoteLineEntity(
+    @PrimaryKey val id: String,
+    val noteId: String,
+    val text: String,
+    val createdAt: Long,
+    val position: Int
+)
+
+@Entity(tableName = "note_photos")
+data class NotePhotoEntity(
+    @PrimaryKey val id: String,
+    val noteId: String,
+    /** MediaStore content URI string. */
+    val mediaUri: String,
+    val createdAt: Long = 0L,
+    val sortOrder: Int = 0,
+    val lineId: String = ""
 )
 
 @Entity(tableName = "comments")
@@ -135,7 +216,8 @@ data class ContactEntity(
     val phone: String = "",
     val email: String = "",
     val role: String = "",
-    val position: Int = 0
+    val position: Int = 0,
+    val social: String = ""
 )
 
 @Entity(

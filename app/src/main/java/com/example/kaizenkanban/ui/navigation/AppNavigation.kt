@@ -31,6 +31,8 @@ import com.example.kaizenkanban.data.local.KairosPreferences
 import com.example.kaizenkanban.domain.model.Task
 import com.example.kaizenkanban.ui.aiprompts.AiPromptsScreen
 import com.example.kaizenkanban.ui.board.BoardScreen
+import com.example.kaizenkanban.ui.board.TaskCardScreen
+import com.example.kaizenkanban.ui.board.TaskTimerCorner
 import com.example.kaizenkanban.ui.calendar.CalendarScreen
 import com.example.kaizenkanban.ui.eisenhower.EisenhowerMatrixScreen
 import com.example.kaizenkanban.ui.i18n.KanbanNames
@@ -62,7 +64,8 @@ private fun NavHostController.openBoard(
     boardId: String,
     columnId: String? = null,
     taskId: String? = null,
-    addTask: Boolean = false
+    addTask: Boolean = false,
+    dueMillis: Long? = null
 ) {
     val route = buildString {
         append("board/$boardId")
@@ -70,6 +73,7 @@ private fun NavHostController.openBoard(
             if (!columnId.isNullOrBlank()) add("columnId=$columnId")
             if (!taskId.isNullOrBlank()) add("taskId=$taskId")
             if (addTask) add("addTask=1")
+            if (dueMillis != null) add("due=$dueMillis")
         }
         if (query.isNotEmpty()) {
             append('?')
@@ -92,6 +96,7 @@ fun AppNavigation(
     val pendingOpenTaskId by sharedViewModel.pendingOpenTaskId.collectAsState()
     val pendingQuickAdd by sharedViewModel.pendingQuickAdd.collectAsState()
     val pendingAddTask by sharedViewModel.pendingAddTask.collectAsState()
+    val pendingAddNote by sharedViewModel.pendingAddNote.collectAsState()
     val context = LocalContext.current
     val kairosPrefs = remember { KairosPreferences(context) }
 
@@ -121,11 +126,28 @@ fun AppNavigation(
         }
     }
 
+    LaunchedEffect(pendingAddNote, state.isInitialized) {
+        if (!pendingAddNote || !state.isInitialized) return@LaunchedEffect
+        val board = state.boards.find { it.isDefault && !it.isArchived }
+            ?: state.boards.firstOrNull { !it.isArchived }
+            ?: return@LaunchedEffect
+        sharedViewModel.hasAutoNavigated = true
+        val route = "notes/${board.projectId}"
+        val alreadyOnNotes = navController.currentDestination?.route == "notes/{projectId}" &&
+            navController.currentBackStackEntry?.arguments?.getString("projectId") == board.projectId
+        if (!alreadyOnNotes) {
+            navController.navigate(route) {
+                launchSingleTop = true
+            }
+        }
+    }
+
     LaunchedEffect(pendingOpenTaskId, state.isInitialized, state.tasks, state.columns) {
         val taskId = pendingOpenTaskId ?: return@LaunchedEffect
         if (!state.isInitialized) return@LaunchedEffect
         if (sharedViewModel.pendingQuickAdd.value) return@LaunchedEffect
         if (sharedViewModel.pendingAddTask.value) return@LaunchedEffect
+        if (sharedViewModel.pendingAddNote.value) return@LaunchedEffect
         val task = state.tasks.find { it.id == taskId }
         if (task == null) {
             sharedViewModel.clearPendingOpenTask()
@@ -150,6 +172,7 @@ fun AppNavigation(
         }
     }
 
+    Box(Modifier.fillMaxSize()) {
     NavHost(
         navController = navController,
         startDestination = "root",
@@ -180,7 +203,8 @@ fun AppNavigation(
                         sharedViewModel.hasAutoNavigated = true
                         val skipAutoBoard = sharedViewModel.pendingOpenTaskId.value != null ||
                             sharedViewModel.pendingQuickAdd.value ||
-                            sharedViewModel.pendingAddTask.value
+                            sharedViewModel.pendingAddTask.value ||
+                            sharedViewModel.pendingAddNote.value
                         if (!skipAutoBoard) {
                             val primary = state.boards.find { it.isDefault && !it.isArchived }
                                 ?: state.boards.firstOrNull { !it.isArchived }
@@ -212,8 +236,8 @@ fun AppNavigation(
                         onNavigateToBoard = { boardId, columnId ->
                             navController.openBoard(boardId, columnId)
                         },
-                        onNavigateToCalendar = {
-                            navController.navigate("calendar") {
+                        onNavigateToCalendar = { projectId ->
+                            navController.navigate("calendar/$projectId") {
                                 launchSingleTop = true
                             }
                         },
@@ -241,6 +265,11 @@ fun AppNavigation(
                             navController.navigate("aiPrompts/$projectId") {
                                 launchSingleTop = true
                             }
+                        },
+                        onNavigateToNotes = { projectId ->
+                            navController.navigate("notes/$projectId") {
+                                launchSingleTop = true
+                            }
                         }
                     )
                 }
@@ -254,8 +283,8 @@ fun AppNavigation(
                 onNavigateToBoard = { boardId, columnId ->
                     navController.openBoard(boardId, columnId)
                 },
-                onNavigateToCalendar = {
-                    navController.navigate("calendar") {
+                onNavigateToCalendar = { projectId ->
+                    navController.navigate("calendar/$projectId") {
                         launchSingleTop = true
                     }
                 },
@@ -281,6 +310,11 @@ fun AppNavigation(
                 },
                 onNavigateToAiPrompts = { projectId ->
                     navController.navigate("aiPrompts/$projectId") {
+                        launchSingleTop = true
+                    }
+                },
+                onNavigateToNotes = { projectId ->
+                    navController.navigate("notes/$projectId") {
                         launchSingleTop = true
                     }
                 }
@@ -346,7 +380,7 @@ fun AppNavigation(
         }
 
         composable(
-            route = "board/{boardId}?columnId={columnId}&taskId={taskId}&addTask={addTask}",
+            route = "board/{boardId}?columnId={columnId}&taskId={taskId}&addTask={addTask}&due={due}",
             arguments = listOf(
                 navArgument("boardId") { type = NavType.StringType },
                 navArgument("columnId") {
@@ -363,6 +397,11 @@ fun AppNavigation(
                     type = NavType.StringType
                     defaultValue = ""
                     nullable = true
+                },
+                navArgument("due") {
+                    type = NavType.StringType
+                    defaultValue = ""
+                    nullable = true
                 }
             )
         ) { backStackEntry ->
@@ -370,6 +409,7 @@ fun AppNavigation(
             val columnId = backStackEntry.arguments?.getString("columnId")?.takeIf { it.isNotBlank() }
             val taskId = backStackEntry.arguments?.getString("taskId")?.takeIf { it.isNotBlank() }
             val openAddTask = backStackEntry.arguments?.getString("addTask") == "1"
+            val dueMillis = backStackEntry.arguments?.getString("due")?.toLongOrNull()
             val board = state.boards.find { it.id == boardId }
             if (board != null && KanbanNames.isEisenhowerBoard(board.name)) {
                 LaunchedEffect(board.id) {
@@ -384,19 +424,15 @@ fun AppNavigation(
                 initialColumnId = columnId,
                 initialTaskId = taskId,
                 initialOpenAddTask = openAddTask,
+                initialDueMillis = dueMillis,
                 viewModel = sharedViewModel,
                 windowSizeClass = windowSizeClass,
+                onOpenTypedTask = { typedTaskId ->
+                    navController.navigate("card/$typedTaskId") {
+                        launchSingleTop = true
+                    }
+                },
                 onBack = { navController.goToProjects() },
-                onNavigateToCalendar = {
-                    navController.navigate("calendar") {
-                        launchSingleTop = true
-                    }
-                },
-                onNavigateToSettings = {
-                    navController.navigate("settings") {
-                        launchSingleTop = true
-                    }
-                },
                 onOpenEisenhowerMatrix = { projectId ->
                     navController.navigate("eisenhower/$projectId") {
                         launchSingleTop = true
@@ -405,14 +441,51 @@ fun AppNavigation(
             )
         }
 
-        composable("calendar") {
+        composable(
+            route = "card/{taskId}",
+            arguments = listOf(navArgument("taskId") { type = NavType.StringType })
+        ) { backStackEntry ->
+            val taskId = backStackEntry.arguments?.getString("taskId") ?: return@composable
+            TaskCardScreen(
+                taskId = taskId,
+                viewModel = sharedViewModel,
+                onBack = { navController.popBackStack() }
+            )
+        }
+
+        composable(
+            route = "notes/{projectId}",
+            arguments = listOf(navArgument("projectId") { type = NavType.StringType })
+        ) { backStackEntry ->
+            val projectId = backStackEntry.arguments?.getString("projectId") ?: return@composable
+            com.example.kaizenkanban.ui.notes.NotesScreen(
+                projectId = projectId,
+                viewModel = sharedViewModel,
+                onBack = { navController.popBackStack() }
+            )
+        }
+
+        composable(
+            route = "calendar/{projectId}",
+            arguments = listOf(navArgument("projectId") { type = NavType.StringType })
+        ) { backStackEntry ->
+            val projectId = backStackEntry.arguments?.getString("projectId") ?: return@composable
             CalendarScreen(
+                projectId = projectId,
                 viewModel = sharedViewModel,
                 onBack = { navController.popBackStack() },
                 onOpenTask = { boardId, columnId, taskId ->
                     navController.openBoard(boardId, columnId, taskId)
+                },
+                onAddTask = { boardId, columnId, dueMillis ->
+                    navController.openBoard(boardId, columnId, addTask = true, dueMillis = dueMillis)
                 }
             )
         }
+    }
+    TaskTimerCorner(
+        tasks = state.tasks,
+        modifier = Modifier.fillMaxSize()
+    )
     }
 }

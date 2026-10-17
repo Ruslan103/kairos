@@ -3,9 +3,19 @@ package com.example.kaizenkanban.ui.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.example.kaizenkanban.data.local.KairosPreferences
+import com.example.kaizenkanban.data.local.GalleryNotePhotoStore
 import com.example.kaizenkanban.data.local.TaskAttachmentStore
 import com.example.kaizenkanban.data.transfer.KairosTransferHelper
 import com.example.kaizenkanban.domain.TaskCompletionGate
+import com.example.kaizenkanban.domain.commands.KairosApplyResult
+import com.example.kaizenkanban.domain.commands.KairosApplyUndo
+import com.example.kaizenkanban.domain.commands.KairosCommandApplier
+import com.example.kaizenkanban.domain.commands.KairosCommandPlanner
+import com.example.kaizenkanban.domain.commands.KairosCommandParser
+import com.example.kaizenkanban.domain.commands.KairosPlan
+import org.json.JSONArray
+import org.json.JSONObject
 import com.example.kaizenkanban.domain.model.*
 import com.example.kaizenkanban.domain.repository.KanbanRepository
 import com.example.kaizenkanban.domain.usecase.*
@@ -32,8 +42,15 @@ data class AppState(
     val taskLinks: List<TaskLink> = emptyList(),
     val taskAttachments: List<TaskAttachment> = emptyList(),
     val statsJournal: List<StatsJournalEntry> = emptyList(),
+    val reminders: List<KairosReminder> = emptyList(),
+    val projectNotes: List<ProjectNote> = emptyList(),
+    val noteLines: List<NoteLine> = emptyList(),
+    val notePhotos: List<NotePhoto> = emptyList(),
     val isInitialized: Boolean = false
 )
+
+/** Progress of [SharedViewModel.clearArchiveToJournal]; null when idle. */
+data class ClearArchiveProgress(val processed: Int, val total: Int)
 
 private data class DeletedTaskSnapshot(
     val task: Task,
@@ -69,7 +86,9 @@ class SharedViewModel(
     private val exportDataUseCase: ExportDataUseCase,
     private val importDataUseCase: ImportDataUseCase,
     private val ensureRecurringInstancesUseCase: EnsureRecurringInstancesUseCase,
-    private val attachmentStore: TaskAttachmentStore? = null
+    private val attachmentStore: TaskAttachmentStore? = null,
+    private val notePhotoStore: GalleryNotePhotoStore? = null,
+    private val preferences: KairosPreferences? = null
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(AppState())
@@ -79,6 +98,9 @@ class SharedViewModel(
     private val _pendingOpenTaskId = MutableStateFlow<String?>(null)
     val pendingOpenTaskId: StateFlow<String?> = _pendingOpenTaskId.asStateFlow()
     private val deletedSnapshots = mutableMapOf<String, DeletedTaskSnapshot>()
+    private val kairosUndoMemory = mutableMapOf<String, ArrayDeque<KairosApplyUndo>>()
+    private val _kairosUndoRevision = MutableStateFlow(0)
+    val kairosUndoRevision: StateFlow<Int> = _kairosUndoRevision.asStateFlow()
     private val taskMutationMutex = Mutex()
 
     /** Completion gate first, then mutation mutex — same order everywhere to avoid deadlocks / stale writes. */
@@ -106,6 +128,15 @@ class SharedViewModel(
     private val _pendingAddTask = MutableStateFlow(false)
     val pendingAddTask: StateFlow<Boolean> = _pendingAddTask.asStateFlow()
 
+    private val _pendingAddNote = MutableStateFlow(false)
+    val pendingAddNote: StateFlow<Boolean> = _pendingAddNote.asStateFlow()
+
+    private val _pendingVoiceNote = MutableStateFlow(false)
+    val pendingVoiceNote: StateFlow<Boolean> = _pendingVoiceNote.asStateFlow()
+
+    private val _clearArchiveProgress = MutableStateFlow<ClearArchiveProgress?>(null)
+    val clearArchiveProgress: StateFlow<ClearArchiveProgress?> = _clearArchiveProgress.asStateFlow()
+
     fun requestQuickAdd() {
         _pendingQuickAdd.value = true
     }
@@ -116,6 +147,15 @@ class SharedViewModel(
 
     fun requestAddTask() {
         _pendingAddTask.value = true
+    }
+
+    fun requestAddNote() {
+        _pendingAddNote.value = true
+    }
+
+    fun requestVoiceNote() {
+        _pendingVoiceNote.value = true
+        _pendingAddNote.value = true
     }
 
     /** Returns true once if a voice request was pending (clears the flag). */
@@ -135,8 +175,25 @@ class SharedViewModel(
         return true
     }
 
+    fun consumePendingAddNote(): Boolean {
+        if (!_pendingAddNote.value) return false
+        _pendingAddNote.value = false
+        return true
+    }
+
+    fun consumePendingVoiceNote(): Boolean {
+        if (!_pendingVoiceNote.value) return false
+        _pendingVoiceNote.value = false
+        return true
+    }
+
     fun clearPendingQuickAdd() {
         _pendingQuickAdd.value = false
+    }
+
+    fun clearPendingAddNote() {
+        _pendingAddNote.value = false
+        _pendingVoiceNote.value = false
     }
 
     private data class CompletedUndo(
@@ -280,11 +337,23 @@ class SharedViewModel(
             }.combine(repository.getAllTaskAttachments()) { pair, attachments ->
                 Pair(pair, attachments)
             }.combine(repository.getAllStatsJournal()) { pair, journal ->
-                val (linksPair, attachments) = pair
-                val (triplePair, links) = linksPair
-                val (inner, templates) = triplePair
-                val (triple, contacts) = inner
-                val (core, comments, colComments) = triple
+                Pair(pair, journal)
+            }.combine(repository.getAllReminders()) { pair, reminders ->
+                Pair(pair, reminders)
+            }.combine(repository.getAllProjectNotes()) { pair, notes ->
+                Pair(pair, notes)
+            }.combine(repository.getAllNoteLines()) { pair, noteLines ->
+                Pair(pair, noteLines)
+            }.combine(repository.getAllNotePhotos()) { pair, notePhotos ->
+                val (withLines, noteLines) = pair
+                val (withNotes, notes) = withLines
+                val (withReminders, reminders) = withNotes
+                val (withJournal, journal) = withReminders
+                val (withAttachments, attachments) = withJournal
+                val (withLinks, links) = withAttachments
+                val (withTemplates, templates) = withLinks
+                val (withContacts, contacts) = withTemplates
+                val (core, comments, colComments) = withContacts
                 AppState(
                     projects = core.projects,
                     boards = core.boards,
@@ -298,6 +367,10 @@ class SharedViewModel(
                     taskLinks = links,
                     taskAttachments = attachments,
                     statsJournal = journal,
+                    reminders = reminders,
+                    projectNotes = notes,
+                    noteLines = noteLines,
+                    notePhotos = notePhotos,
                     isInitialized = true
                 )
             }.collect { fullState ->
@@ -313,16 +386,38 @@ class SharedViewModel(
                     if (ready) ensureTodayRecurringInstances()
                 }
         }
+
+        viewModelScope.launch {
+            state.collect { snapshot ->
+                if (snapshot.isInitialized) markGoalsHubTasks(snapshot)
+            }
+        }
     }
 
     fun ensureTodayRecurringInstances() {
         viewModelScope.launch {
             val s = _state.value
+            val prefs = preferences
+            val now = System.currentTimeMillis()
+            val templates = repository.getAllRecurringTemplates().first()
             ensureRecurringInstancesUseCase(
-                templates = s.recurringTemplates,
-                tasks = s.tasks,
-                columns = s.columns
+                templates = templates,
+                columns = s.columns,
+                now = now,
+                defaultReminderMinutes = prefs?.reminderMinutesOfDay
+                    ?: TaskReminderDefaults.DEFAULT_MINUTES,
+                defaultSpawnMinutes = prefs?.spawnMinutesOfDay
+                    ?: RecurringDefaults.DEFAULT_SPAWN_MINUTES,
+                onlySlotsReadyByNow = true,
+                primaryHubByBoardId = EnsureRecurringInstancesUseCase.resolvePrimaryHubs(
+                    boards = s.boards,
+                    columns = s.columns,
+                    storedHubId = { boardId -> prefs?.getPrimaryHubId(boardId) }
+                ),
+                dueTodaySweptDay = prefs?.dueTodayPrimarySweepDay ?: 0L,
+                onDueTodaySwept = { day -> prefs?.dueTodayPrimarySweepDay = day }
             )
+            repository.getAllRecurringTemplates().first().forEach { refreshRecurringLeadReminders(it) }
         }
     }
 
@@ -331,14 +426,232 @@ class SharedViewModel(
             val existing = _state.value.recurringTemplates.any { it.id == template.id }
             if (existing) repository.updateRecurringTemplate(template)
             else repository.insertRecurringTemplate(template)
+            _state.value.tasks
+                .filter { it.recurringTemplateId == template.id && !it.isCompleted && !it.isBoardArchived }
+                .forEach { task ->
+                    val nextDeadline = task.dueDate?.let { start ->
+                        EnsureRecurringInstancesUseCase.instanceDeadlineAt(
+                            start,
+                            template.deadlineOffsetDays,
+                            template.deadlineOffsetHours
+                        )
+                    }
+                    val nextTimer = template.timerMinutes?.takeIf { it > 0 }
+                    if (task.deadlineAt != nextDeadline || task.timerMinutes != nextTimer) {
+                        updateTaskUseCase(
+                            task.copy(
+                                deadlineAt = nextDeadline,
+                                timerMinutes = nextTimer
+                            )
+                        )
+                    }
+                }
+            refreshRecurringLeadReminders(template)
             ensureTodayRecurringInstances()
+        }
+    }
+
+    /** Parse + plan a pasted KAIROS v1 command block (no DB writes). */
+    fun planKairosCommands(
+        raw: String,
+        projectId: String,
+        selectedGoalId: String? = null
+    ): KairosPlan {
+        val s = _state.value
+        val parse = KairosCommandParser.parse(raw)
+        val projectBoardIds = s.boards.filter { it.projectId == projectId }.map { it.id }.toSet()
+        val projectColumns = s.columns.filter { it.boardId in projectBoardIds }
+        val projectColumnIds = projectColumns.map { it.id }.toSet()
+        val projectTasks = s.tasks.filter {
+            !it.isHidden &&
+                (it.columnId in projectColumnIds || it.linkedColumnIds.any { id -> id in projectColumnIds })
+        }
+        return KairosCommandPlanner.plan(
+            parse = parse,
+            ctx = KairosCommandPlanner.Context(
+                projectId = projectId,
+                boards = s.boards.filter { it.projectId == projectId },
+                columns = projectColumns,
+                tasks = projectTasks,
+                links = s.taskLinks,
+                selectedGoalId = selectedGoalId,
+                defaultReminderMinutes = preferences?.reminderMinutesOfDay
+                    ?: TaskReminderDefaults.DEFAULT_MINUTES
+            )
+        )
+    }
+
+    /** Apply a previously planned command block. Triggers recurring ensure after habits. */
+    fun applyKairosPlan(
+        plan: KairosPlan,
+        projectId: String,
+        onDone: (KairosApplyResult) -> Unit
+    ) {
+        viewModelScope.launch {
+            val s = _state.value
+            val projectBoardIds = s.boards.filter { it.projectId == projectId }.map { it.id }.toSet()
+            val projectColumnIds = s.columns.filter { it.boardId in projectBoardIds }.map { it.id }.toSet()
+            val projectTasks = s.tasks.filter {
+                it.columnId in projectColumnIds || it.linkedColumnIds.any { id -> id in projectColumnIds }
+            }
+            val result = withContext(Dispatchers.IO) {
+                KairosCommandApplier(repository).apply(
+                    plan = plan,
+                    projectId = projectId,
+                    existingTasks = projectTasks,
+                    existingLinks = s.taskLinks
+                )
+            }
+            if (result.createdHabits > 0) ensureTodayRecurringInstances()
+            if (result.createdTaskIds.isNotEmpty() ||
+                result.createdHabitIds.isNotEmpty() ||
+                result.createdLinksPairs.isNotEmpty()
+            ) {
+                pushKairosUndo(
+                    projectId,
+                    KairosApplyUndo(
+                        taskIds = result.createdTaskIds,
+                        habitIds = result.createdHabitIds,
+                        links = result.createdLinksPairs
+                    )
+                )
+            }
+            onDone(result)
+        }
+    }
+
+    fun kairosUndoCount(projectId: String): Int = readKairosUndos(projectId).size
+
+    /** Removes the newest applied command block: created tasks, habits, and links. */
+    fun undoLastKairosApply(projectId: String, onDone: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            val batch = popKairosUndo(projectId)
+            if (batch == null) {
+                onDone(false)
+                return@launch
+            }
+            val habitIds = batch.habitIds.toSet()
+            val spawnedIds = _state.value.tasks
+                .filter { task ->
+                    val templateId = task.recurringTemplateId
+                    !templateId.isNullOrBlank() && templateId in habitIds
+                }
+                .map { it.id }
+            val taskIds = (batch.taskIds + spawnedIds).distinct()
+            withContext(Dispatchers.IO) {
+                batch.links.forEach { (parentId, childId) ->
+                    repository.deleteTaskLink(parentId, childId)
+                }
+                taskIds.forEach { deleteTaskUseCase(it) }
+                batch.habitIds.forEach { repository.deleteRecurringTemplate(it) }
+            }
+            val focusId = preferences?.inProgressTaskId
+            if (focusId != null && focusId in taskIds) {
+                preferences?.inProgressTaskId = null
+            }
+            onDone(true)
+        }
+    }
+
+    private fun pushKairosUndo(projectId: String, batch: KairosApplyUndo) {
+        val prefs = preferences
+        if (prefs == null) {
+            val stack = kairosUndoMemory.getOrPut(projectId) { ArrayDeque() }
+            stack.addLast(batch)
+            while (stack.size > 20) stack.removeFirst()
+        } else {
+            val arr = decodeKairosUndos(prefs.kairosUndoLog(projectId))
+            arr.put(encodeKairosUndo(batch))
+            while (arr.length() > 20) {
+                val trimmed = JSONArray()
+                for (i in 1 until arr.length()) trimmed.put(arr.getJSONObject(i))
+                prefs.setKairosUndoLog(projectId, trimmed.toString())
+                _kairosUndoRevision.value = _kairosUndoRevision.value + 1
+                return
+            }
+            prefs.setKairosUndoLog(projectId, arr.toString())
+        }
+        _kairosUndoRevision.value = _kairosUndoRevision.value + 1
+    }
+
+    private fun popKairosUndo(projectId: String): KairosApplyUndo? {
+        val prefs = preferences
+        if (prefs == null) {
+            val batch = kairosUndoMemory[projectId]?.removeLastOrNull()
+            if (batch != null) _kairosUndoRevision.value = _kairosUndoRevision.value + 1
+            return batch
+        }
+        val arr = decodeKairosUndos(prefs.kairosUndoLog(projectId))
+        if (arr.length() == 0) return null
+        val last = arr.getJSONObject(arr.length() - 1)
+        val trimmed = JSONArray()
+        for (i in 0 until arr.length() - 1) trimmed.put(arr.getJSONObject(i))
+        prefs.setKairosUndoLog(projectId, trimmed.toString())
+        _kairosUndoRevision.value = _kairosUndoRevision.value + 1
+        return decodeKairosUndo(last)
+    }
+
+    private fun readKairosUndos(projectId: String): List<KairosApplyUndo> {
+        val prefs = preferences ?: return kairosUndoMemory[projectId].orEmpty().toList()
+        val arr = decodeKairosUndos(prefs.kairosUndoLog(projectId))
+        return buildList {
+            for (i in 0 until arr.length()) add(decodeKairosUndo(arr.getJSONObject(i)))
+        }
+    }
+
+    private fun encodeKairosUndo(batch: KairosApplyUndo): JSONObject = JSONObject().apply {
+        put("tasks", JSONArray(batch.taskIds))
+        put("habits", JSONArray(batch.habitIds))
+        put("links", JSONArray().apply {
+            batch.links.forEach { (parentId, childId) -> put("$parentId|$childId") }
+        })
+    }
+
+    private fun decodeKairosUndo(obj: JSONObject): KairosApplyUndo {
+        val tasks = obj.optJSONArray("tasks")
+        val habits = obj.optJSONArray("habits")
+        val links = obj.optJSONArray("links")
+        return KairosApplyUndo(
+            taskIds = jsonStrings(tasks),
+            habitIds = jsonStrings(habits),
+            links = buildList {
+                if (links == null) return@buildList
+                for (i in 0 until links.length()) {
+                    val raw = links.optString(i)
+                    val split = raw.split('|', limit = 2)
+                    if (split.size == 2 && split[0].isNotBlank() && split[1].isNotBlank()) {
+                        add(split[0] to split[1])
+                    }
+                }
+            }
+        )
+    }
+
+    private fun decodeKairosUndos(raw: String): JSONArray {
+        if (raw.isBlank()) return JSONArray()
+        return try {
+            JSONArray(raw)
+        } catch (_: Exception) {
+            JSONArray()
+        }
+    }
+
+    private fun jsonStrings(array: JSONArray?): List<String> {
+        if (array == null) return emptyList()
+        return buildList {
+            for (i in 0 until array.length()) {
+                val value = array.optString(i)
+                if (value.isNotBlank()) add(value)
+            }
         }
     }
 
     fun setRecurringTemplateEnabled(templateId: String, enabled: Boolean) {
         viewModelScope.launch {
             val current = _state.value.recurringTemplates.find { it.id == templateId } ?: return@launch
-            repository.updateRecurringTemplate(current.copy(enabled = enabled))
+            val updated = current.copy(enabled = enabled)
+            repository.updateRecurringTemplate(updated)
+            refreshRecurringLeadReminders(updated)
             if (enabled) ensureTodayRecurringInstances()
         }
     }
@@ -393,23 +706,35 @@ class SharedViewModel(
         }
     }
 
-    fun addContact(projectId: String, name: String, phone: String, email: String, role: String) {
+    fun addContact(
+        projectId: String,
+        name: String,
+        phone: String,
+        email: String,
+        role: String,
+        social: String = ""
+    ): String {
+        val trimmed = name.trim()
+        if (trimmed.isBlank() || projectId.isBlank()) return ""
+        val id = UUID.randomUUID().toString()
+        val nextPos = (_state.value.contacts
+            .filter { it.projectId == projectId }
+            .maxOfOrNull { it.position } ?: -1) + 1
         viewModelScope.launch {
-            val nextPos = (_state.value.contacts
-                .filter { it.projectId == projectId }
-                .maxOfOrNull { it.position } ?: -1) + 1
             repository.insertContact(
                 Contact(
-                    id = UUID.randomUUID().toString(),
+                    id = id,
                     projectId = projectId,
-                    name = name.trim(),
+                    name = trimmed,
                     phone = phone.trim(),
                     email = email.trim(),
                     role = role.trim(),
+                    social = social.trim(),
                     position = nextPos
                 )
             )
         }
+        return id
     }
 
     fun updateContact(contact: Contact) {
@@ -472,6 +797,14 @@ class SharedViewModel(
         viewModelScope.launch {
             val board = _state.value.boards.find { it.id == id } ?: return@launch
             if (isProtectedBoard(board)) return@launch
+            repository.deleteBoard(id)
+        }
+    }
+
+    /** Settings DB browser: delete board even if default/protected. */
+    fun hardDeleteBoard(id: String) {
+        viewModelScope.launch {
+            if (_state.value.boards.none { it.id == id }) return@launch
             repository.deleteBoard(id)
         }
     }
@@ -552,10 +885,19 @@ class SharedViewModel(
         eisenhowerQuadrant: String? = null,
         showEisenhowerButtons: Boolean = true,
         reminderMinutesOfDay: Int? = null,
+        startMinutesOfDay: Int? = null,
+        deadlineAt: Long? = null,
         complexity: Int? = null,
         estimatedMinutes: Int? = null,
         parentIds: List<String> = emptyList(),
-        childIds: List<String> = emptyList()
+        childIds: List<String> = emptyList(),
+        noteLeadAmount: Int? = null,
+        noteLeadUnit: RemindLeadUnit? = null,
+        noteText: String? = null,
+        isGoal: Boolean = false,
+        timerMinutes: Int? = null,
+        cardType: String = com.example.kaizenkanban.domain.model.TaskCardKind.PLAIN,
+        cardPayload: String = ""
     ) {
         viewModelScope.launch {
             val taskId = addTaskUseCase(
@@ -567,8 +909,14 @@ class SharedViewModel(
                 eisenhowerQuadrant,
                 showEisenhowerButtons,
                 reminderMinutesOfDay = reminderMinutesOfDay,
+                startMinutesOfDay = startMinutesOfDay,
+                deadlineAt = deadlineAt,
                 complexity = complexity,
-                estimatedMinutes = estimatedMinutes
+                estimatedMinutes = estimatedMinutes,
+                isGoal = isGoal,
+                timerMinutes = timerMinutes,
+                cardType = cardType,
+                cardPayload = cardPayload
             ) ?: return@launch
             val working = _state.value.taskLinks.toMutableList()
             parentIds.distinct().forEach { parentId ->
@@ -593,7 +941,313 @@ class SharedViewModel(
                 repository.insertTaskLink(link)
                 working += link
             }
+            insertTaskLeadReminder(
+                taskId = taskId,
+                columnId = columnId,
+                title = title,
+                dueDate = dueDate,
+                reminderMinutesOfDay = startMinutesOfDay ?: reminderMinutesOfDay,
+                amount = noteLeadAmount,
+                unit = noteLeadUnit,
+                text = noteText
+            )
         }
+    }
+
+    fun setTaskLeadReminder(
+        task: Task,
+        amount: Int?,
+        unit: RemindLeadUnit?,
+        text: String
+    ) {
+        viewModelScope.launch {
+            repository.deleteRemindersForTask(task.id)
+            insertTaskLeadReminder(
+                taskId = task.id,
+                columnId = task.columnId,
+                title = task.title,
+                dueDate = task.dueDate,
+                reminderMinutesOfDay = task.startMinutesOfDay ?: task.reminderMinutesOfDay,
+                amount = amount,
+                unit = unit,
+                text = text
+            )
+        }
+    }
+
+    fun addStandaloneReminder(projectId: String, text: String, triggerAtMillis: Long) {
+        viewModelScope.launch {
+            val body = text.trim()
+            if (projectId.isBlank() || body.isBlank()) return@launch
+            repository.insertReminder(
+                KairosReminder(
+                    id = UUID.randomUUID().toString(),
+                    projectId = projectId,
+                    text = body,
+                    triggerAtMillis = triggerAtMillis,
+                    createdAt = System.currentTimeMillis()
+                )
+            )
+        }
+    }
+
+    fun deleteReminder(id: String) {
+        viewModelScope.launch { repository.deleteReminder(id) }
+    }
+
+    fun upsertProjectNote(
+        projectId: String,
+        body: String,
+        existingId: String? = null,
+        pinned: Boolean = false,
+        linkedTaskId: String? = null,
+        reminderAtMillis: Long? = null,
+        title: String = "",
+        lines: List<NoteLine> = emptyList(),
+        onSaved: (String) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            val text = body.trim()
+            val heading = title.trim()
+            if (projectId.isBlank() || (text.isBlank() && heading.isBlank() && lines.isEmpty())) return@launch
+            val now = System.currentTimeMillis()
+            val existing = existingId?.let { id ->
+                _state.value.projectNotes.find { it.id == id }
+            }
+            val note = if (existing != null) {
+                existing.copy(
+                    body = text,
+                    title = heading,
+                    updatedAt = now,
+                    pinned = pinned,
+                    linkedTaskId = linkedTaskId,
+                    reminderAtMillis = reminderAtMillis
+                )
+            } else {
+                val nextPos = _state.value.projectNotes
+                    .filter { it.projectId == projectId }
+                    .maxOfOrNull { it.position }
+                    ?.plus(1) ?: 0
+                ProjectNote(
+                    id = UUID.randomUUID().toString(),
+                    projectId = projectId,
+                    body = text,
+                    createdAt = now,
+                    updatedAt = now,
+                    position = nextPos,
+                    pinned = pinned,
+                    linkedTaskId = linkedTaskId,
+                    reminderAtMillis = reminderAtMillis,
+                    title = heading
+                )
+            }
+            repository.insertProjectNote(note)
+            repository.replaceNoteLines(note.id, lines.map { it.copy(noteId = note.id) })
+            syncNoteReminder(note)
+            onSaved(note.id)
+        }
+    }
+
+    fun setNotePinned(noteId: String, pinned: Boolean) {
+        viewModelScope.launch {
+            val note = _state.value.projectNotes.find { it.id == noteId } ?: return@launch
+            repository.insertProjectNote(note.copy(pinned = pinned, updatedAt = System.currentTimeMillis()))
+        }
+    }
+
+    fun moveProjectNote(noteId: String, direction: Int) {
+        viewModelScope.launch {
+            val note = _state.value.projectNotes.find { it.id == noteId } ?: return@launch
+            val siblings = _state.value.projectNotes
+                .filter { it.projectId == note.projectId }
+                .sortedWith(compareByDescending<ProjectNote> { it.pinned }.thenBy { it.position }.thenByDescending { it.createdAt })
+            val idx = siblings.indexOfFirst { it.id == noteId }
+            val target = idx + direction
+            if (idx < 0 || target !in siblings.indices) return@launch
+            val a = siblings[idx]
+            val b = siblings[target]
+            val now = System.currentTimeMillis()
+            repository.insertProjectNote(a.copy(position = b.position, updatedAt = now))
+            repository.insertProjectNote(b.copy(position = a.position, updatedAt = now))
+        }
+    }
+
+    fun deleteProjectNote(noteId: String) {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                repository.deleteProjectNote(noteId)
+            }
+        }
+    }
+
+    fun addNotePhoto(noteId: String, lineId: String, uri: Uri, onResult: (String?) -> Unit = {}) {
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                try {
+                    val store = notePhotoStore ?: return@withContext "error"
+                    val current = _state.value.notePhotos.count { it.noteId == noteId }
+                    if (current >= NotePhoto.MAX_PER_NOTE) return@withContext "limit"
+                    val id = UUID.randomUUID().toString()
+                    val mediaUri = store.saveImageFromUri(uri, id)
+                    repository.insertNotePhoto(
+                        NotePhoto(
+                            id = id,
+                            noteId = noteId,
+                            mediaUri = mediaUri,
+                            createdAt = System.currentTimeMillis(),
+                            sortOrder = current,
+                            lineId = lineId
+                        )
+                    )
+                    null
+                } catch (_: Exception) {
+                    "error"
+                }
+            }
+            onResult(result)
+        }
+    }
+
+    fun deleteNotePhoto(photoId: String) {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                repository.deleteNotePhoto(photoId)
+            }
+        }
+    }
+
+    /**
+     * Creates a task from the note (body → title/description), copies gallery photos into
+     * task storage, optionally links to [ProjectNote.linkedTaskId] if it is a goal, then deletes the note.
+     * @return new task id or null
+     */
+    suspend fun convertNoteToTask(noteId: String): String? = withContext(Dispatchers.IO) {
+        val note = _state.value.projectNotes.find { it.id == noteId } ?: return@withContext null
+        val boards = _state.value.boards.filter { it.projectId == note.projectId && !it.isArchived }
+        val board = boards.find { it.isDefault } ?: boards.firstOrNull() ?: return@withContext null
+        val columns = _state.value.columns.filter { it.boardId == board.id }.sortedBy { it.position }
+        if (columns.isEmpty()) return@withContext null
+        val prefs = preferences
+        val markedId = prefs?.getPrimaryHubId(board.id)
+        val hub = columns.find { it.id == markedId } ?: columns.first()
+        val lines = note.body.trim().lines().filter { it.isNotBlank() }
+        val explicitTitle = note.title.trim()
+        val title = if (explicitTitle.isNotEmpty()) {
+            explicitTitle.take(120)
+        } else {
+            (lines.firstOrNull() ?: note.body).take(120)
+        }
+        val description = if (explicitTitle.isNotEmpty()) {
+            note.body.trim()
+        } else if (lines.size > 1) {
+            lines.drop(1).joinToString("\n")
+        } else {
+            ""
+        }
+        val tasksInColumn = _state.value.tasks.filter { it.columnId == hub.id }
+        val taskId = addTaskUseCase(
+            title = title,
+            columnId = hub.id,
+            categoryId = null,
+            dueDate = null,
+            currentTasksInColumn = tasksInColumn
+        ) ?: return@withContext null
+        if (description.isNotBlank()) {
+            val created = repository.getAllTasks().first().find { it.id == taskId }
+            if (created != null) {
+                updateTaskUseCase(created.copy(description = description))
+            }
+        }
+        val linked = note.linkedTaskId?.let { id -> _state.value.tasks.find { it.id == id } }
+        if (linked != null && linked.isGoal) {
+            repository.insertTaskLink(
+                TaskLink(parentId = linked.id, childId = taskId, createdAt = System.currentTimeMillis())
+            )
+        }
+        val photos = repository.getPhotosForNote(noteId)
+        val store = attachmentStore
+        photos.forEachIndexed { index, photo ->
+            if (store == null) return@forEachIndexed
+            try {
+                val uri = Uri.parse(photo.mediaUri)
+                val attachmentId = UUID.randomUUID().toString()
+                val relative = store.saveImageFromUri(uri, note.projectId, taskId, attachmentId)
+                repository.insertTaskAttachment(
+                    TaskAttachment(
+                        id = attachmentId,
+                        taskId = taskId,
+                        relativePath = relative,
+                        createdAt = System.currentTimeMillis(),
+                        sortOrder = index
+                    )
+                )
+            } catch (_: Exception) {
+                // skip broken gallery refs
+            }
+        }
+        repository.deleteProjectNote(noteId)
+        taskId
+    }
+
+    private suspend fun syncNoteReminder(note: ProjectNote) {
+        val reminderId = NoteReminderIds.forNote(note.id)
+        repository.deleteReminder(reminderId)
+        val at = note.reminderAtMillis ?: return
+        val text = note.displayTitle().take(80)
+        if (text.isBlank()) return
+        repository.insertReminder(
+            KairosReminder(
+                id = reminderId,
+                projectId = note.projectId,
+                text = text,
+                triggerAtMillis = at,
+                createdAt = note.createdAt
+            )
+        )
+    }
+
+    private suspend fun insertTaskLeadReminder(
+        taskId: String,
+        columnId: String,
+        title: String,
+        dueDate: Long?,
+        reminderMinutesOfDay: Int?,
+        amount: Int?,
+        unit: RemindLeadUnit?,
+        text: String?
+    ) {
+        if (amount == null || unit == null || amount <= 0 || dueDate == null) return
+        val projectId = projectIdForColumn(columnId) ?: return
+        val body = text?.trim().orEmpty().ifBlank { title.trim() }
+        if (body.isBlank()) return
+        val anchor = RemindLeadCalculator.taskAnchor(
+            dueDate,
+            reminderMinutesOfDay,
+            preferences?.reminderMinutesOfDay ?: TaskReminderDefaults.DEFAULT_MINUTES
+        )
+        repository.insertReminder(
+            KairosReminder(
+                id = UUID.randomUUID().toString(),
+                projectId = projectId,
+                text = body,
+                triggerAtMillis = RemindLeadCalculator.subtract(anchor, amount, unit),
+                taskId = taskId,
+                leadAmount = amount,
+                leadUnit = unit.id,
+                createdAt = System.currentTimeMillis()
+            )
+        )
+    }
+
+    private fun projectIdForColumn(columnId: String): String? {
+        val boardId = _state.value.columns.find { it.id == columnId }?.boardId ?: return null
+        return _state.value.boards.find { it.id == boardId }?.projectId
+    }
+
+    private suspend fun refreshRecurringLeadReminders(template: RecurringTemplate) {
+        repository.deleteRemindersForTemplate(template.id)
+        val planned = com.example.kaizenkanban.domain.reminders.RecurringReminderPlanner.plan(template)
+        if (planned.isNotEmpty()) repository.insertReminders(planned)
     }
 
     fun setTaskQuadrant(task: Task, quadrant: String?) {
@@ -621,7 +1275,8 @@ class SharedViewModel(
                 relocateTaskAppearance(
                     latest.copy(
                         eisenhowerQuadrant = task.eisenhowerQuadrant,
-                        showEisenhowerButtons = task.showEisenhowerButtons
+                        showEisenhowerButtons = task.showEisenhowerButtons,
+                        hubGroupId = task.hubGroupId
                     ),
                     newColumnId,
                     newPosition,
@@ -646,34 +1301,233 @@ class SharedViewModel(
     fun updateTask(task: Task) {
         viewModelScope.launch {
             withAllTaskLocks {
-                updateTaskUseCase(task)
+                val next = if (!task.isGoal && isGoalByHub(task.columnId)) {
+                    task.copy(isGoal = true)
+                } else {
+                    task
+                }
+                updateTaskUseCase(next)
             }
         }
     }
 
-    /** Put selected hub tasks into one visual group (same [Task.hubGroupId]). */
-    fun groupHubTasks(taskIds: Collection<String>): Boolean {
-        val unique = taskIds.distinct()
-        if (unique.size < 2) return false
+    /** True when [columnId] is the board's goals list, so its cards stay goals. */
+    fun isGoalByHub(columnId: String): Boolean {
+        val column = _state.value.columns.find { it.id == columnId } ?: return false
+        val prefs = preferences
+        val stored = prefs?.getGoalsHubId(column.boardId)
+        return when {
+            stored != null && column.id == stored -> true
+            stored == null && KanbanNames.isMainGoalHub(column.title) -> true
+            else -> false
+        }
+    }
+
+    private suspend fun markGoalsHubTasks(snapshot: AppState) {
+        val prefs = preferences ?: return
+        val toMark = mutableListOf<Task>()
+        snapshot.boards.forEach { board ->
+            val columns = snapshot.columns
+                .filter { it.boardId == board.id }
+                .sortedBy { it.position }
+            val stored = prefs.getGoalsHubId(board.id)
+            val hub = if (stored != null && columns.any { it.id == stored }) {
+                columns.first { it.id == stored }
+            } else {
+                if (stored != null) prefs.setGoalsHubId(board.id, null)
+                columns.firstOrNull { KanbanNames.isMainGoalHub(it.title) }?.also { found ->
+                    prefs.setGoalsHubId(board.id, found.id)
+                }
+            } ?: return@forEach
+            snapshot.tasks.forEach { task ->
+                if (task.columnId == hub.id && !task.isGoal && !task.isBoardArchived) {
+                    toMark += task
+                }
+            }
+        }
+        if (toMark.isEmpty()) return
+        toMark.forEach { updateTaskUseCase(it.copy(isGoal = true)) }
+    }
+
+    /**
+     * Group recurring templates that share a hub. Spawned instances copy [RecurringTemplate.hubGroupId],
+     * and open instances already on the hub join the same block.
+     * Returns null when fewer than two templates are selected or they target different hubs.
+     */
+    fun groupRecurringTemplates(templateIds: Collection<String>): String? {
+        val selected = templateIds.distinct().mapNotNull { id ->
+            _state.value.recurringTemplates.find { it.id == id }
+        }
+        if (selected.isEmpty()) return null
+        val columnId = selected.first().targetColumnId
+        if (selected.any { it.targetColumnId != columnId }) return null
+        val existingGroupId = selected.mapNotNull { it.hubGroupId?.takeIf { g -> g.isNotBlank() } }
+            .groupingBy { it }
+            .eachCount()
+            .maxByOrNull { it.value }
+            ?.key
+        if (existingGroupId == null && selected.size < 2) return null
+        val groupId = existingGroupId ?: UUID.randomUUID().toString()
+        val selectedIds = selected.map { it.id }.toSet()
         viewModelScope.launch {
             withAllTaskLocks {
-                val selected = unique.mapNotNull { id -> _state.value.tasks.find { it.id == id } }
-                if (selected.size < 2) return@withAllTaskLocks
-                val homeColumn = selected.first().columnId
-                if (selected.any { it.columnId != homeColumn }) return@withAllTaskLocks
-                val groupId = UUID.randomUUID().toString()
-                val ordered = selected.sortedBy { it.position }
-                val basePos = ordered.first().position
-                val updated = ordered.mapIndexed { index, task ->
-                    task.copy(hubGroupId = groupId, position = basePos + index)
+                selected.forEach { template ->
+                    repository.updateRecurringTemplate(template.copy(hubGroupId = groupId))
                 }
-                repository.updateTasks(updated)
+                val tasks = _state.value.tasks
+                val memberIds = tasks.filter {
+                    it.columnId == columnId && !it.isCompleted && !it.isHidden &&
+                        (it.recurringTemplateId in selectedIds || it.hubGroupId == groupId)
+                }.map { it.id }.toSet()
+                if (memberIds.isEmpty()) return@withAllTaskLocks
+                val allActive = tasks
+                    .filter { it.columnId == columnId && !it.isCompleted && !it.isHidden }
+                    .sortedBy { it.position }
+                val packed = HubGroupOrdering.packGroupAtTop(allActive, memberIds)
+                val withFlag = tasks.map { task ->
+                    if (task.id in memberIds) task.copy(hubGroupId = groupId) else task
+                }
+                repository.updateTasks(withFlag.filter { it.id in memberIds })
+                moveTaskUseCase.reorderHomeTasks(columnId, packed.map { it.id }, withFlag)
+            }
+        }
+        return groupId
+    }
+
+    /** Append recurring templates to an existing group. They must target the group's hub. */
+    fun addRecurringTemplatesToGroup(groupId: String, templateIds: Collection<String>): Boolean {
+        val gid = groupId.takeIf { it.isNotBlank() } ?: return false
+        val seed = _state.value.recurringTemplates.firstOrNull { it.hubGroupId == gid } ?: return false
+        val columnId = seed.targetColumnId
+        val toAdd = templateIds.distinct().mapNotNull { id ->
+            _state.value.recurringTemplates.find {
+                it.id == id && it.targetColumnId == columnId && it.hubGroupId != gid
+            }
+        }
+        if (toAdd.isEmpty()) return false
+        val selectedIds = toAdd.map { it.id }.toSet()
+        viewModelScope.launch {
+            withAllTaskLocks {
+                toAdd.forEach { template ->
+                    repository.updateRecurringTemplate(template.copy(hubGroupId = gid))
+                }
+                val tasks = _state.value.tasks
+                val memberIds = tasks.filter {
+                    it.columnId == columnId && !it.isCompleted && !it.isHidden &&
+                        (it.recurringTemplateId in selectedIds || it.hubGroupId == gid)
+                }.map { it.id }.toSet()
+                if (memberIds.isEmpty()) return@withAllTaskLocks
+                val allActive = tasks
+                    .filter { it.columnId == columnId && !it.isCompleted && !it.isHidden }
+                    .sortedBy { it.position }
+                val packed = HubGroupOrdering.packGroupAtTop(allActive, memberIds)
+                val withFlag = tasks.map { task ->
+                    if (task.id in memberIds) task.copy(hubGroupId = gid) else task
+                }
+                repository.updateTasks(withFlag.filter { it.id in memberIds })
+                moveTaskUseCase.reorderHomeTasks(columnId, packed.map { it.id }, withFlag)
             }
         }
         return true
     }
 
-    fun ungroupHubTasks(taskIds: Collection<String>) {
+    fun ungroupRecurringTemplates(templateIds: Collection<String>) {
+        val ids = templateIds.toSet()
+        val selected = _state.value.recurringTemplates.filter {
+            it.id in ids && !it.hubGroupId.isNullOrBlank()
+        }
+        if (selected.isEmpty()) return
+        val selectedIds = selected.map { it.id }.toSet()
+        val groupIds = selected.mapNotNull { it.hubGroupId }.toSet()
+        viewModelScope.launch {
+            withAllTaskLocks {
+                selected.forEach { template ->
+                    repository.updateRecurringTemplate(template.copy(hubGroupId = null))
+                }
+                val cleared = _state.value.tasks.filter {
+                    it.recurringTemplateId in selectedIds &&
+                        it.hubGroupId in groupIds &&
+                        !it.isCompleted
+                }.map { it.copy(hubGroupId = null) }
+                if (cleared.isNotEmpty()) repository.updateTasks(cleared)
+            }
+        }
+    }
+
+    /** Put selected hub tasks into one visual group at the top; merges into an existing group when selected. */
+    fun groupHubTasks(taskIds: Collection<String>): String? {
+        val unique = taskIds.distinct()
+        if (unique.isEmpty()) return null
+        val selected = unique.mapNotNull { id -> _state.value.tasks.find { it.id == id } }
+        if (selected.isEmpty()) return null
+        val homeColumn = selected.first().columnId
+        if (selected.any { it.columnId != homeColumn }) return null
+
+        val existingGroupId = selected.mapNotNull { it.hubGroupId?.takeIf { g -> g.isNotBlank() } }
+            .groupingBy { it }
+            .eachCount()
+            .maxByOrNull { it.value }
+            ?.key
+
+        if (existingGroupId == null && unique.size < 2) return null
+
+        val groupId = existingGroupId ?: UUID.randomUUID().toString()
+        viewModelScope.launch {
+            withAllTaskLocks {
+                val allActive = _state.value.tasks
+                    .filter { it.columnId == homeColumn && !it.isCompleted && !it.isHidden }
+                    .sortedBy { it.position }
+                val memberIds = (
+                    unique + allActive.filter { it.hubGroupId == groupId }.map { it.id }
+                    ).toSet()
+                val packed = HubGroupOrdering.packGroupAtTop(allActive, memberIds)
+                val taggedIds = packed.map { it.id }
+                val withGroupFlag = _state.value.tasks.map { t ->
+                    if (t.id in memberIds) t.copy(hubGroupId = groupId) else t
+                }
+                repository.updateTasks(
+                    withGroupFlag.filter { it.id in memberIds }
+                )
+                moveTaskUseCase.reorderHomeTasks(homeColumn, taggedIds, withGroupFlag)
+            }
+        }
+        return groupId
+    }
+
+    /** Append [taskIds] to an existing hub group and keep the block at the top. */
+    fun addTasksToHubGroup(groupId: String, taskIds: Collection<String>): Boolean {
+        val gid = groupId.takeIf { it.isNotBlank() } ?: return false
+        val unique = taskIds.distinct()
+        if (unique.isEmpty()) return false
+        val seed = _state.value.tasks.firstOrNull { it.hubGroupId == gid } ?: return false
+        val homeColumn = seed.columnId
+        val toAdd = unique.mapNotNull { id ->
+            _state.value.tasks.find { it.id == id && it.columnId == homeColumn }
+        }
+        if (toAdd.isEmpty()) return false
+        viewModelScope.launch {
+            withAllTaskLocks {
+                val allActive = _state.value.tasks
+                    .filter { it.columnId == homeColumn && !it.isCompleted && !it.isHidden }
+                    .sortedBy { it.position }
+                val memberIds = (
+                    allActive.filter { it.hubGroupId == gid }.map { it.id } + toAdd.map { it.id }
+                    ).toSet()
+                val packed = HubGroupOrdering.packGroupAtTop(allActive, memberIds)
+                val withGroupFlag = _state.value.tasks.map { t ->
+                    if (t.id in memberIds) t.copy(hubGroupId = gid) else t
+                }
+                repository.updateTasks(withGroupFlag.filter { it.id in memberIds })
+                moveTaskUseCase.reorderHomeTasks(homeColumn, packed.map { it.id }, withGroupFlag)
+            }
+        }
+        return true
+    }
+
+    fun ungroupHubTasks(taskIds: Collection<String>): Set<String> {
+        val groupIds = taskIds.mapNotNull { id ->
+            _state.value.tasks.find { it.id == id }?.hubGroupId
+        }.toSet()
         viewModelScope.launch {
             withAllTaskLocks {
                 val updated = taskIds.mapNotNull { id ->
@@ -682,6 +1536,7 @@ class SharedViewModel(
                 if (updated.isNotEmpty()) repository.updateTasks(updated)
             }
         }
+        return groupIds
     }
 
     fun toggleTaskHidden(task: Task) {
@@ -835,13 +1690,13 @@ class SharedViewModel(
         viewModelScope.launch {
             withAllTaskLocks {
                 val task = _state.value.tasks.find { it.id == taskId } ?: return@withAllTaskLocks
-                val kind = when {
-                    task.isCompleted -> StatsJournalEntry.KIND_DONE
-                    task.isNotDone -> StatsJournalEntry.KIND_NOT_DONE
-                    else -> null
-                }
                 val projectTasks = projectTasksFor(projectId)
-                if (!task.statsExcluded && kind != null) {
+                if (!task.statsExcluded) {
+                    val kind = when {
+                        task.isCompleted -> StatsJournalEntry.KIND_DONE
+                        task.isNotDone -> StatsJournalEntry.KIND_NOT_DONE
+                        else -> StatsJournalEntry.KIND_OPEN
+                    }
                     val entry = com.example.kaizenkanban.domain.stats.ProjectStatsCalculator.journalFromTask(
                         task = task,
                         projectId = projectId,
@@ -859,20 +1714,23 @@ class SharedViewModel(
 
     /** Journal all archived tasks (that count in stats), then delete them from Archive. */
     fun clearArchiveToJournal(projectId: String) {
+        if (_clearArchiveProgress.value != null) return
         viewModelScope.launch {
-            withAllTaskLocks {
-                val projectTasks = projectTasksFor(projectId)
-                val archived = projectTasks.filter { it.isBoardArchived }
-                if (archived.isEmpty()) return@withAllTaskLocks
-                val links = _state.value.taskLinks
-                archived.forEach { task ->
-                    if (!task.statsExcluded) {
-                        val kind = when {
-                            task.isCompleted -> StatsJournalEntry.KIND_DONE
-                            task.isNotDone -> StatsJournalEntry.KIND_NOT_DONE
-                            else -> null
-                        }
-                        if (kind != null) {
+            try {
+                withAllTaskLocks {
+                    val projectTasks = projectTasksFor(projectId)
+                    val archived = projectTasks.filter { it.isBoardArchived }
+                    if (archived.isEmpty()) return@withAllTaskLocks
+                    val links = _state.value.taskLinks
+                    val total = archived.size
+                    _clearArchiveProgress.value = ClearArchiveProgress(processed = 0, total = total)
+                    archived.forEachIndexed { index, task ->
+                        if (!task.statsExcluded) {
+                            val kind = when {
+                                task.isCompleted -> StatsJournalEntry.KIND_DONE
+                                task.isNotDone -> StatsJournalEntry.KIND_NOT_DONE
+                                else -> StatsJournalEntry.KIND_OPEN
+                            }
                             val entry = com.example.kaizenkanban.domain.stats.ProjectStatsCalculator.journalFromTask(
                                 task = task,
                                 projectId = projectId,
@@ -882,10 +1740,17 @@ class SharedViewModel(
                             )
                             repository.insertStatsJournal(entry)
                         }
+                        recordRecurringSkipIfNeeded(task)
+                        deleteTaskUseCase(task.id)
+                        _clearArchiveProgress.value = ClearArchiveProgress(
+                            processed = index + 1,
+                            total = total
+                        )
+                        kotlinx.coroutines.yield()
                     }
-                    recordRecurringSkipIfNeeded(task)
-                    deleteTaskUseCase(task.id)
                 }
+            } finally {
+                _clearArchiveProgress.value = null
             }
         }
     }
@@ -907,6 +1772,22 @@ class SharedViewModel(
             val column = _state.value.columns.find { it.id == columnId } ?: return@launch
             val hubsOnBoard = _state.value.columns.count { it.boardId == column.boardId }
             if (hubsOnBoard <= 1) return@launch
+            val prefs = preferences
+            if (prefs != null && prefs.getGoalsHubId(column.boardId) == columnId) {
+                prefs.setGoalsHubId(column.boardId, null)
+            }
+            deleteColumnUseCase(columnId)
+        }
+    }
+
+    /** Settings DB browser: delete hub even if it is the last one on the board. */
+    fun hardDeleteColumn(columnId: String) {
+        viewModelScope.launch {
+            val column = _state.value.columns.find { it.id == columnId } ?: return@launch
+            val prefs = preferences
+            if (prefs != null && prefs.getGoalsHubId(column.boardId) == columnId) {
+                prefs.setGoalsHubId(column.boardId, null)
+            }
             deleteColumnUseCase(columnId)
         }
     }
@@ -944,6 +1825,18 @@ class SharedViewModel(
                     recurringSkipKey = skipKey
                 )
                 deleteTaskUseCase(taskId)
+            }
+        }
+    }
+
+    /** Settings DB browser: permanent delete with no undo snapshot. */
+    fun hardDeleteTask(taskId: String) {
+        viewModelScope.launch {
+            withAllTaskLocks {
+                val task = _state.value.tasks.find { it.id == taskId } ?: return@withAllTaskLocks
+                recordRecurringSkipIfNeeded(task)
+                deleteTaskUseCase(taskId)
+                deletedSnapshots.remove(taskId)
             }
         }
     }
@@ -1038,6 +1931,13 @@ class SharedViewModel(
 
     fun attachmentAbsolutePath(relativePath: String): String? =
         attachmentStore?.absoluteFile(relativePath)?.absolutePath
+
+    /** Content URI or absolute file path for preview/thumbnail. */
+    fun attachmentPreviewRef(relativePath: String): String? {
+        val store = attachmentStore ?: return null
+        return if (store.isContentUri(relativePath)) relativePath
+        else store.absoluteFile(relativePath)?.absolutePath
+    }
 
     // Column Comments (Hub comments)
     fun addColumnComment(columnId: String, text: String) {
@@ -1349,7 +2249,14 @@ class SharedViewModel(
             columnComments = full.columnComments.filter { it.columnId in columnIds },
             contacts = full.contacts.filter { it.projectId == projectId },
             categories = full.categories.filter { it.id in categoryIds },
-            taskLinks = full.taskLinks.filter { it.parentId in taskIds && it.childId in taskIds }
+            taskLinks = full.taskLinks.filter { it.parentId in taskIds && it.childId in taskIds },
+            projectNotes = full.projectNotes.filter { it.projectId == projectId },
+            noteLines = full.noteLines.filter { line ->
+                full.projectNotes.any { it.id == line.noteId && it.projectId == projectId }
+            },
+            notePhotos = full.notePhotos.filter { photo ->
+                full.projectNotes.any { it.id == photo.noteId && it.projectId == projectId }
+            }
         )
     }
 
@@ -1395,7 +2302,9 @@ class SharedViewModelFactory(
     private val exportDataUseCase: ExportDataUseCase,
     private val importDataUseCase: ImportDataUseCase,
     private val ensureRecurringInstancesUseCase: EnsureRecurringInstancesUseCase,
-    private val attachmentStore: TaskAttachmentStore? = null
+    private val attachmentStore: TaskAttachmentStore? = null,
+    private val notePhotoStore: GalleryNotePhotoStore? = null,
+    private val preferences: KairosPreferences? = null
 ) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(SharedViewModel::class.java)) {
@@ -1405,7 +2314,9 @@ class SharedViewModelFactory(
                 addColumnUseCase, deleteColumnUseCase, renameColumnUseCase, deleteTaskUseCase, setDefaultBoardUseCase,
                 addCommentUseCase, deleteCommentUseCase, addColumnCommentUseCase, deleteColumnCommentUseCase,
                 moveTaskToBoardUseCase, exportDataUseCase, importDataUseCase, ensureRecurringInstancesUseCase,
-                attachmentStore
+                attachmentStore,
+                notePhotoStore,
+                preferences
             ) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")

@@ -5,12 +5,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.example.kaizenkanban.ui.components.DialogChoicePill
 import com.example.kaizenkanban.ui.i18n.LocalAppStrings
 import java.util.Calendar
 import java.util.TimeZone
@@ -68,34 +66,26 @@ fun DueDateQuickPick(
             .horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        FilterChip(
+        DialogChoicePill(
             selected = todaySelected,
             onClick = { onSelect(today) },
-            label = {
-                Text(s.dueToday, maxLines = 1, softWrap = false, overflow = TextOverflow.Clip)
-            }
+            label = s.dueToday
         )
-        FilterChip(
+        DialogChoicePill(
             selected = tomorrowSelected,
             onClick = { onSelect(tomorrow) },
-            label = {
-                Text(s.dueTomorrow, maxLines = 1, softWrap = false, overflow = TextOverflow.Clip)
-            }
+            label = s.dueTomorrow
         )
-        FilterChip(
+        DialogChoicePill(
             selected = customSelected,
             onClick = onPickCustom,
-            label = {
-                Text(s.pickDate, maxLines = 1, softWrap = false, overflow = TextOverflow.Clip)
-            }
+            label = s.pickDate
         )
         if (selectedDueDate != null) {
-            FilterChip(
+            DialogChoicePill(
                 selected = false,
                 onClick = { onSelect(null) },
-                label = {
-                    Text(s.clearDueDate, maxLines = 1, softWrap = false, overflow = TextOverflow.Clip)
-                }
+                label = s.clearDueDate
             )
         }
     }

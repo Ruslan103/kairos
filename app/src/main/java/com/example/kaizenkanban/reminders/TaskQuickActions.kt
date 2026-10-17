@@ -10,7 +10,9 @@ import com.example.kaizenkanban.data.local.AppDatabase
 import com.example.kaizenkanban.data.local.KairosPreferences
 import com.example.kaizenkanban.data.repository.KanbanRepositoryImpl
 import com.example.kaizenkanban.domain.TaskCompletionGate
+import com.example.kaizenkanban.domain.model.Task
 import com.example.kaizenkanban.domain.model.TaskWorkflow
+import com.example.kaizenkanban.domain.reminders.RecurringReminderPlanner
 import com.example.kaizenkanban.ui.calendar.localNoonForDayOffset
 import com.example.kaizenkanban.widget.KairosWidgetUpdater
 import kotlinx.coroutines.flow.first
@@ -28,9 +30,13 @@ object TaskQuickActions {
         if (taskId.isBlank()) return false
         val appContext = context.applicationContext
         val repo = repository(appContext)
-        val task = repo.getAllTasks().first().find { it.id == taskId } ?: return false
+        val task = repo.getAllTasks().first().find { it.id == taskId }
+        if (task == null) {
+            dismissTaskNotifications(appContext, repo, taskId, task = null)
+            return false
+        }
         if (task.isCompleted) {
-            dismissNotification(appContext, taskId)
+            dismissTaskNotifications(appContext, repo, taskId, task)
             return true
         }
         val completedAt = System.currentTimeMillis()
@@ -50,7 +56,8 @@ object TaskQuickActions {
         }
         val tasks = repo.getAllTasks().first()
         DueReminderScheduler.sync(appContext, tasks)
-        dismissNotification(appContext, taskId)
+        TaskTimerScheduler.cancel(appContext, taskId)
+        dismissTaskNotifications(appContext, repo, taskId, task)
         KairosWidgetUpdater.updateAll(appContext, tasks)
         showUndoDoneNotification(appContext, taskId, task.title, spawnedTaskId = null)
         return true
@@ -98,7 +105,7 @@ object TaskQuickActions {
     }
 
     suspend fun loadIncompleteDueTasks(context: Context) =
-        repository(context).getAllTasks().first()
+        repository(context).getAllTasks().first().filter { !it.isHidden }
 
     private fun showUndoDoneNotification(
         context: Context,
@@ -136,6 +143,22 @@ object TaskQuickActions {
 
     private fun dismissNotification(context: Context, taskId: String) {
         NotificationManagerCompat.from(context).cancel(taskId.hashCode())
+    }
+
+    /** Due reminder, timer alert, and lead/note reminders for this task. */
+    private suspend fun dismissTaskNotifications(
+        context: Context,
+        repo: KanbanRepositoryImpl,
+        taskId: String,
+        task: Task?
+    ) {
+        DueReminderScheduler.dismiss(context, taskId)
+        val reminderIds = repo.getAllReminders().first()
+            .filter { it.taskId == taskId }
+            .map { it.id }
+            .toMutableSet()
+        task?.let { RecurringReminderPlanner.idForTask(it) }?.let { reminderIds += it }
+        reminderIds.forEach { NoteReminderScheduler.dismiss(context, it) }
     }
 
     private const val UNDO_NOTIFY_BASE = 0x51_00_00_00

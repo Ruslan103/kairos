@@ -69,6 +69,14 @@ interface KanbanRepository {
     suspend fun deleteRecurringTemplate(templateId: String)
     suspend fun deleteRecurringTemplatesByProject(projectId: String)
 
+    fun getAllReminders(): Flow<List<KairosReminder>>
+    suspend fun insertReminder(reminder: KairosReminder)
+    suspend fun insertReminders(reminders: List<KairosReminder>)
+    suspend fun deleteReminder(id: String)
+    suspend fun deleteRemindersForTask(taskId: String)
+    suspend fun deleteRemindersForTemplate(templateId: String)
+    suspend fun deleteRemindersByProject(projectId: String)
+
     // Task links (DAG)
     fun getAllTaskLinks(): Flow<List<TaskLink>>
     suspend fun insertTaskLink(link: TaskLink)
@@ -86,4 +94,20 @@ interface KanbanRepository {
     fun getAllStatsJournal(): Flow<List<StatsJournalEntry>>
     suspend fun insertStatsJournal(entry: StatsJournalEntry)
     suspend fun deleteStatsJournal(id: String)
+
+    // Project notes
+    fun getAllProjectNotes(): Flow<List<ProjectNote>>
+    suspend fun insertProjectNote(note: ProjectNote)
+    suspend fun insertProjectNotes(notes: List<ProjectNote>)
+    suspend fun deleteProjectNote(id: String)
+    suspend fun deleteProjectNotesByProject(projectId: String)
+
+    fun getAllNoteLines(): Flow<List<NoteLine>>
+    suspend fun replaceNoteLines(noteId: String, lines: List<NoteLine>)
+
+    fun getAllNotePhotos(): Flow<List<NotePhoto>>
+    suspend fun insertNotePhoto(photo: NotePhoto)
+    suspend fun deleteNotePhoto(id: String)
+    suspend fun deleteNotePhotosByNote(noteId: String)
+    suspend fun getPhotosForNote(noteId: String): List<NotePhoto>
 }

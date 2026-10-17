@@ -18,6 +18,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.example.kaizenkanban.ui.components.DialogMarqueeText
 import com.example.kaizenkanban.ui.components.DialogSectionDivider
 import com.example.kaizenkanban.ui.i18n.LocalAppStrings
 
@@ -39,16 +40,17 @@ fun OnboardingDialog(
 
     AlertDialog(
         onDismissRequest = onFinished,
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(10.dp),
         title = {
-            Text(title, fontWeight = FontWeight.Bold)
+            DialogMarqueeText(text = title, fontWeight = FontWeight.Bold, maxLines = 3)
         },
         text = {
             Column {
-                Text(
+                DialogMarqueeText(
                     text = body,
                     style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 8
                 )
                 DialogSectionDivider()
                 Row(

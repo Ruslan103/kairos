@@ -61,7 +61,7 @@ fun ThemeToggle(modifier: Modifier = Modifier) {
     val controller = LocalThemeController.current
     val mode = LocalAppThemeMode.current
     val s = LocalAppStrings.current
-    val shape = RoundedCornerShape(8.dp)
+    val shape = RoundedCornerShape(10.dp)
     Row(
         modifier = modifier
             .clip(shape)
@@ -72,6 +72,7 @@ fun ThemeToggle(modifier: Modifier = Modifier) {
         ThemeChip("A", s.themeSystem, mode == AppThemeMode.SYSTEM) { controller.select(AppThemeMode.SYSTEM) }
         ThemeChip("L", s.themeLight, mode == AppThemeMode.LIGHT) { controller.select(AppThemeMode.LIGHT) }
         ThemeChip("D", s.themeDark, mode == AppThemeMode.DARK) { controller.select(AppThemeMode.DARK) }
+        ThemeChip("S", s.themeSlate, mode == AppThemeMode.SLATE) { controller.select(AppThemeMode.SLATE) }
     }
 }
 
@@ -82,16 +83,16 @@ private fun ThemeChip(
     selected: Boolean,
     onClick: () -> Unit
 ) {
-    val shape = RoundedCornerShape(6.dp)
+    val shape = RoundedCornerShape(10.dp)
     Text(
         text = short,
         fontSize = 11.sp,
         fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-        color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+        color = if (selected) buttonLabel() else MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier
             .clip(shape)
             .then(
-                if (selected) Modifier.background(MaterialTheme.colorScheme.primary)
+                if (selected) Modifier.background(buttonFill()).border(1.dp, buttonLine(), shape)
                 else Modifier
             )
             .clickable(onClick = onClick)

@@ -25,6 +25,8 @@ object DueReminderScheduler {
     const val EXTRA_OPEN_QUICK_ADD = "open_quick_add"
     const val EXTRA_OPEN_VOICE = "open_voice_assistant"
     const val EXTRA_OPEN_ADD_TASK = "open_add_task"
+    const val EXTRA_OPEN_ADD_NOTE = "open_add_note"
+    const val EXTRA_OPEN_VOICE_NOTE = "open_voice_note"
 
     fun ensureChannel(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -53,11 +55,21 @@ object DueReminderScheduler {
         ensureChannel(context)
         val appContext = context.applicationContext
         val alarmManager = appContext.getSystemService(AlarmManager::class.java) ?: return
-        val incompleteWithDue = tasks.filter { !it.isCompleted && it.dueDate != null }
+        val incompleteWithDue = tasks.filter {
+            !it.isCompleted && !it.isHidden && !it.isNotDone && it.dueDate != null
+        }
         val activeIds = incompleteWithDue.map { it.id }.toSet()
 
         val prefs = KairosPreferences(appContext)
-        prefs.scheduledReminderTaskIds
+        val knownIds = tasks.associateBy { it.id }
+        val postedIds = prefs.scheduledReminderTaskIds
+        (postedIds.filter { id ->
+            val task = knownIds[id]
+            task == null || task.isCompleted || task.isNotDone
+        } + tasks.filter { it.isCompleted || it.isNotDone }.map { it.id })
+            .distinct()
+            .forEach { dismiss(appContext, it) }
+        postedIds
             .filter { it !in activeIds }
             .forEach { cancel(appContext, alarmManager, it) }
 
@@ -69,7 +81,8 @@ object DueReminderScheduler {
 
     fun schedule(context: Context, task: Task) {
         val due = task.dueDate ?: return
-        if (task.isCompleted) {
+        if (task.isCompleted || task.isHidden || task.isNotDone) {
+            dismiss(context, task.id)
             cancel(context, task.id)
             return
         }
@@ -77,6 +90,12 @@ object DueReminderScheduler {
         val prefs = KairosPreferences(context)
         schedule(context.applicationContext, alarmManager, prefs, task.copy(dueDate = due))
         prefs.scheduledReminderTaskIds = prefs.scheduledReminderTaskIds + task.id
+    }
+
+    fun dismiss(context: Context, taskId: String) {
+        if (taskId.isBlank()) return
+        NotificationManagerCompat.from(context.applicationContext).cancel(requestCode(taskId))
+        TaskTimerScheduler.dismiss(context, taskId)
     }
 
     fun cancel(context: Context, taskId: String) {
@@ -136,7 +155,7 @@ object DueReminderScheduler {
     }
 
     fun resolveReminderClock(prefs: KairosPreferences, task: Task): Pair<Int, Int> {
-        val custom = task.reminderMinutesOfDay
+        val custom = task.reminderMinutesOfDay ?: task.startMinutesOfDay
         return if (custom != null) {
             val clamped = custom.coerceIn(0, 23 * 60 + 59)
             (clamped / 60) to (clamped % 60)

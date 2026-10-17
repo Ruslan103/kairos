@@ -1,126 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-
-    <!-- Background Base -->
     <path
-        android:pathData="M0,0h108v108h-108z">
-        <aapt:attr name="android:fillColor">
-            <gradient
-                android:startX="12"
-                android:startY="8"
-                android:endX="96"
-                android:endY="100"
-                android:type="linear">
-                <item android:offset="0.0" android:color="#1A1828" />
-                <item android:offset="0.5" android:color="#110E1E" />
-                <item android:offset="1.0" android:color="#08070F" />
-            </gradient>
-        </aapt:attr>
-    </path>
-
-    <!-- Soft Ambient Glow -->
+        android:fillColor="#FFFFFF"
+        android:pathData="M0,0h108v108h-108z" />
     <path
-        android:pathData="M54,54m-40,0a40,40 0 1,1 80,0a40,40 0 1,1 -80,0">
-        <aapt:attr name="android:fillColor">
-            <gradient
-                android:centerX="54"
-                android:centerY="54"
-                android:gradientRadius="40"
-                android:type="radial">
-                <item android:offset="0.0" android:color="#35C13584" />
-                <item android:offset="0.55" android:color="#18833AB4" />
-                <item android:offset="1.0" android:color="#00000000" />
-            </gradient>
-        </aapt:attr>
-    </path>
-
-    <!-- Top Base Horizon -->
-    <path
-        android:pathData="M38,30 L70,30"
-        android:strokeWidth="4"
-        android:strokeLineCap="round">
-        <aapt:attr name="android:strokeColor">
-            <gradient
-                android:startX="38"
-                android:startY="30"
-                android:endX="70"
-                android:endY="30"
-                android:type="linear">
-                <item android:offset="0.0" android:color="#9D2CFF" />
-                <item android:offset="1.0" android:color="#C13584" />
-            </gradient>
-        </aapt:attr>
-    </path>
-
-    <!-- Bottom Base Horizon -->
-    <path
-        android:pathData="M38,78 L70,78"
-        android:strokeWidth="4"
-        android:strokeLineCap="round">
-        <aapt:attr name="android:strokeColor">
-            <gradient
-                android:startX="38"
-                android:startY="78"
-                android:endX="70"
-                android:endY="78"
-                android:type="linear">
-                <item android:offset="0.0" android:color="#E1306C" />
-                <item android:offset="1.0" android:color="#FFB020" />
-            </gradient>
-        </aapt:attr>
-    </path>
-
-    <!-- Hourglass Body Contour -->
-    <path
-        android:pathData="M40,32 L68,32 L56,48 C54.5,50 54.5,58 56,60 L68,76 L40,76 L52,60 C53.5,58 53.5,50 52,48 Z"
-        android:strokeWidth="3.5"
-        android:strokeLineJoin="round">
-        <aapt:attr name="android:strokeColor">
-            <gradient
-                android:startX="40"
-                android:startY="30"
-                android:endX="68"
-                android:endY="78"
-                android:type="linear">
-                <item android:offset="0.0" android:color="#9D2CFF" />
-                <item android:offset="0.32" android:color="#C13584" />
-                <item android:offset="0.68" android:color="#E1306C" />
-                <item android:offset="1.0" android:color="#FF9E1B" />
-            </gradient>
-        </aapt:attr>
-    </path>
-
-    <!-- Kanban Columns inside top chamber (horizons) -->
-    <path
-        android:pathData="M46.5,37.5 L46.5,43.5"
-        android:strokeColor="#B3FFFFFF"
-        android:strokeWidth="2.5"
-        android:strokeLineCap="round" />
-
-    <path
-        android:pathData="M54,36 L54,46.5"
-        android:strokeColor="#E6FFFFFF"
-        android:strokeWidth="2.8"
-        android:strokeLineCap="round" />
-
-    <path
-        android:pathData="M61.5,37.5 L61.5,42.5"
-        android:strokeColor="#B3FFFFFF"
-        android:strokeWidth="2.5"
-        android:strokeLineCap="round" />
-
-    <!-- Kairos Spark / Star of opportunity in bottom chamber -->
-    <path
-        android:pathData="M54,67m-6,0a6,6 0 1,1 12,0a6,6 0 1,1 -12,0"
-        android:fillColor="#35FFD166" />
-
-    <path
-        android:pathData="M54,61 C54,64.5 51.5,67 48,67 C51.5,67 54,69.5 54,73 C54,69.5 56.5,67 60,67 C56.5,67 54,64.5 54,61 Z"
-        android:fillColor="#FFFFFF" />
-
+        android:fillColor="#111111"
+        android:pathData="M69.01,77.00Q67.08,77.00 65.56,76.61Q64.05,76.23 62.79,75.42Q61.54,74.62 60.44,73.39Q59.35,72.17 58.38,70.56L48.91,55.29L45.17,59.09L45.17,68.88Q45.17,70.49 45.59,71.11Q46.01,71.72 47.24,71.91L50.84,72.49L50.84,76.10L31.77,76.10L31.77,72.49L35.38,71.91Q36.61,71.72 36.99,71.11Q37.38,70.49 37.38,68.62L37.38,38.22Q37.38,36.48 36.96,35.90Q36.54,35.32 35.25,35.12L31.77,34.61L31.77,31.00L50.84,31.00L50.84,34.61L47.11,35.19Q46.08,35.32 45.62,35.90Q45.17,36.48 45.17,38.47L45.17,53.29L60.25,38.22Q60.96,37.57 61.09,36.89Q61.22,36.22 60.83,35.74Q60.44,35.25 59.48,35.12L56.45,34.67L57.16,31.00L72.81,31.00L72.81,34.74L70.36,35.25Q69.59,35.38 69.01,35.67Q68.43,35.96 67.75,36.54Q67.08,37.12 65.98,38.22L54.32,50.07L65.15,66.69Q66.50,68.75 67.56,69.95Q68.62,71.14 69.82,71.59Q71.01,72.04 72.68,72.04Q73.26,72.04 73.91,71.94Q74.55,71.85 75.52,71.52L76.23,74.36Q75.07,75.58 73.13,76.29Q71.20,77.00 69.01,77.00Z" />
 </vector>

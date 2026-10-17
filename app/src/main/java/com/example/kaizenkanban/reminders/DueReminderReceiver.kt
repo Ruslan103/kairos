@@ -4,9 +4,11 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import com.example.kaizenkanban.data.local.AppDatabase
+import com.example.kaizenkanban.data.local.KairosPreferences
 import com.example.kaizenkanban.data.repository.KanbanRepositoryImpl
+import com.example.kaizenkanban.domain.reminders.RecurringReminderPlanner
 import com.example.kaizenkanban.domain.usecase.EnsureRecurringInstancesUseCase
-import com.example.kaizenkanban.ui.calendar.isOverdueDate
+import com.example.kaizenkanban.ui.calendar.isPastDeadline
 import com.example.kaizenkanban.widget.KairosWidgetUpdater
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -16,6 +18,59 @@ import kotlinx.coroutines.launch
 class DueReminderReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
         when (intent?.action) {
+            NoteReminderScheduler.ACTION_NOTE_REMINDER -> {
+                val reminderId = intent.getStringExtra(NoteReminderScheduler.EXTRA_REMINDER_ID).orEmpty()
+                val text = intent.getStringExtra(NoteReminderScheduler.EXTRA_REMINDER_TEXT).orEmpty()
+                if (reminderId.isBlank() || text.isBlank()) return
+                val pending = goAsync()
+                CoroutineScope(Dispatchers.IO).launch {
+                    try {
+                        val repo = KanbanRepositoryImpl(AppDatabase.getDatabase(context).kanbanDao())
+                        val reminder = repo.getAllReminders().first().find { it.id == reminderId }
+                        val tasks = repo.getAllTasks().first()
+                        val linkedTaskId = reminder?.taskId
+                        val linkedClosed = !linkedTaskId.isNullOrBlank() && run {
+                            val task = tasks.find { it.id == linkedTaskId }
+                            task == null || task.isCompleted || task.isNotDone
+                        }
+                        val occurrenceClosed = reminder?.recurringTemplateId?.takeIf { it.isNotBlank() } != null &&
+                            tasks.any { task ->
+                                (task.isCompleted || task.isNotDone) &&
+                                    RecurringReminderPlanner.idForTask(task) == reminderId
+                            }
+                        if (linkedClosed || occurrenceClosed) {
+                            NoteReminderScheduler.dismiss(context, reminderId)
+                            return@launch
+                        }
+                        NoteReminderScheduler.show(context, reminderId, text)
+                    } finally {
+                        pending.finish()
+                    }
+                }
+            }
+            TaskTimerScheduler.ACTION_TASK_TIMER -> {
+                val taskId = intent.getStringExtra(DueReminderScheduler.EXTRA_TASK_ID).orEmpty()
+                val fallbackTitle = intent.getStringExtra(DueReminderScheduler.EXTRA_TASK_TITLE).orEmpty()
+                if (taskId.isBlank()) return
+                val pending = goAsync()
+                CoroutineScope(Dispatchers.IO).launch {
+                    try {
+                        val repo = KanbanRepositoryImpl(AppDatabase.getDatabase(context).kanbanDao())
+                        val task = repo.getAllTasks().first().find { it.id == taskId }
+                        if (task == null || task.isCompleted || task.isHidden || !task.showsTimerAction) {
+                            TaskTimerScheduler.cancel(context, taskId)
+                            return@launch
+                        }
+                        TaskTimerScheduler.announceFinished(
+                            context = context,
+                            taskId = task.id,
+                            title = task.title.ifBlank { fallbackTitle }
+                        )
+                    } finally {
+                        pending.finish()
+                    }
+                }
+            }
             ACTION_DUE_REMINDER -> {
                 val taskId = intent.getStringExtra(DueReminderScheduler.EXTRA_TASK_ID).orEmpty()
                 val fallbackTitle = intent.getStringExtra(DueReminderScheduler.EXTRA_TASK_TITLE).orEmpty()
@@ -24,8 +79,12 @@ class DueReminderReceiver : BroadcastReceiver() {
                     try {
                         val repo = KanbanRepositoryImpl(AppDatabase.getDatabase(context).kanbanDao())
                         val task = repo.getAllTasks().first().find { it.id == taskId }
-                        if (task == null || task.isCompleted || task.dueDate == null) return@launch
-                        val overdue = task.dueDate.isOverdueDate()
+                        if (task == null || task.isCompleted || task.isNotDone) {
+                            DueReminderScheduler.dismiss(context, taskId)
+                            return@launch
+                        }
+                        if (task.isHidden || task.dueDate == null) return@launch
+                        val overdue = task.isPastDeadline()
                         DueReminderNotifier.show(
                             context = context,
                             taskId = task.id,
@@ -58,6 +117,8 @@ class DueReminderReceiver : BroadcastReceiver() {
                         val repo = KanbanRepositoryImpl(AppDatabase.getDatabase(context).kanbanDao())
                         val tasks = repo.getAllTasks().first()
                         DueReminderScheduler.sync(context, tasks)
+                        TaskTimerScheduler.sync(context, tasks)
+                        NoteReminderScheduler.sync(context, repo.getAllReminders().first())
                         spawnTodayRecurring(context)
                         RecurringEnsureScheduler.scheduleNext(context)
                         KairosWidgetUpdater.updateAll(context, repo.getAllTasks().first())
@@ -72,13 +133,41 @@ class DueReminderReceiver : BroadcastReceiver() {
     private suspend fun spawnTodayRecurring(context: Context) {
         val repo = KanbanRepositoryImpl(AppDatabase.getDatabase(context).kanbanDao())
         val templates = repo.getAllRecurringTemplates().first()
-        if (templates.none { it.enabled }) return
-        val tasks = repo.getAllTasks().first()
+        val prefs = KairosPreferences(context)
+        val now = System.currentTimeMillis()
+        val boards = repo.getAllBoards().first()
         val columns = repo.getAllColumns().first()
-        val created = EnsureRecurringInstancesUseCase(repo)(templates, tasks, columns)
-        if (created > 0) {
+        val primaryHubs = EnsureRecurringInstancesUseCase.resolvePrimaryHubs(
+            boards = boards,
+            columns = columns,
+            storedHubId = { boardId -> prefs.getPrimaryHubId(boardId) }
+        )
+        val willSweep = EnsureRecurringInstancesUseCase.shouldSweepDueToday(
+            now = now,
+            spawnMinutes = prefs.spawnMinutesOfDay,
+            sweptDayStart = prefs.dueTodayPrimarySweepDay,
+            onlySlotsReadyByNow = true,
+            hasPrimaryHub = primaryHubs.isNotEmpty()
+        )
+        if (templates.none { it.enabled } && !willSweep) return
+        var swept = false
+        val created = EnsureRecurringInstancesUseCase(repo)(
+            templates = templates,
+            columns = columns,
+            now = now,
+            defaultReminderMinutes = prefs.reminderMinutesOfDay,
+            defaultSpawnMinutes = prefs.spawnMinutesOfDay,
+            onlySlotsReadyByNow = true,
+            primaryHubByBoardId = primaryHubs,
+            dueTodaySweptDay = prefs.dueTodayPrimarySweepDay,
+            onDueTodaySwept = { day ->
+                prefs.dueTodayPrimarySweepDay = day
+                swept = true
+            }
+        )
+        if (created > 0 || swept) {
             val refreshed = repo.getAllTasks().first()
-            DueReminderScheduler.sync(context, refreshed)
+            if (created > 0) DueReminderScheduler.sync(context, refreshed)
             KairosWidgetUpdater.updateAll(context, refreshed)
         }
     }
