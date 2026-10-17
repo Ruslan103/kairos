@@ -566,11 +566,6 @@ private fun GoalsTab(
             if (goal == null) {
                 Text(s.statsNoGoals, color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
-                val closurePct = ProjectStatsCalculator.percent(goal.periodDelta)
-                Text(
-                    s.statsGoalClosureLine(s.statsPeriodDelta(closurePct, snapshot.period)),
-                    color = deltaColor(closurePct)
-                )
                 snapshot.chancePeriodDelta?.let { chanceDelta ->
                     val chancePct = ProjectStatsCalculator.percent(chanceDelta)
                     Text(
@@ -630,8 +625,6 @@ private fun GoalsTab(
                 )
             }
             if (showMetricDetails) {
-                Text(s.statsDoneTotal(snapshot.selectedGoalDoneCount))
-                Text(s.statsNotDoneTotal(snapshot.selectedGoalNotDoneCount))
                 Text(
                     s.statsRecurringOfDone(snapshot.selectedGoalRecurringDoneCount),
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -640,6 +633,8 @@ private fun GoalsTab(
                     s.statsRecurringOfNotDone(snapshot.selectedGoalRecurringNotDoneCount),
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                Text(s.statsDoneTotal(snapshot.selectedGoalDoneCount))
+                Text(s.statsNotDoneTotal(snapshot.selectedGoalNotDoneCount))
                 Text(
                     s.statsTaskTotal(
                         snapshot.selectedGoalDoneCount + snapshot.selectedGoalNotDoneCount
@@ -888,9 +883,6 @@ private fun PeriodTab(
             title = if (fromStart) s.statsFromStartSection else s.statsHowPeriodWent(snapshot.period)
         ) {
             if (fromStart) {
-                Text(s.statsDoneTotal(snapshot.doneInPeriod))
-                Text(s.statsNotDoneTotal(snapshot.notDoneCount))
-                Text(s.statsTrivia(snapshot.triviaCount))
                 Text(
                     s.statsRecurringOfDone(snapshot.recurringFact),
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -899,11 +891,9 @@ private fun PeriodTab(
                     s.statsRecurringOfNotDone(snapshot.recurringNotDoneCount),
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Text(
-                    s.statsTaskTotal(
-                        snapshot.doneInPeriod + snapshot.notDoneCount + snapshot.openTaskCount
-                    )
-                )
+                Text(s.statsDoneTotal(snapshot.doneInPeriod))
+                Text(s.statsNotDoneTotal(snapshot.notDoneCount))
+                Text(s.statsTaskTotal(snapshot.doneInPeriod + snapshot.notDoneCount))
             } else {
                 Text(s.statsDoneTotal(snapshot.doneInPeriod))
                 Text(s.statsNotDoneTotal(snapshot.notDoneCount))

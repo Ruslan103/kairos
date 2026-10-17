@@ -5,7 +5,7 @@
 [![Room](https://img.shields.io/badge/Room%20DB-2.6.1-orange?style=flat&logo=sqlite&logoColor=white)](https://developer.android.com/training/data-storage/room)
 [![Architecture](https://img.shields.io/badge/Architecture-Clean%20%2B%20SOLID%20%2B%20MVVM-success)](#архитектура)
 [![API](https://img.shields.io/badge/Min%20SDK-26%2B-brightgreen)](https://android-arsenal.com/api?level=26)
-[![Version](https://img.shields.io/badge/Version-1.2.2-blue)](app/build.gradle.kts)
+[![Version](https://img.shields.io/badge/Version-1.2.3-blue)](app/build.gradle.kts)
 [![License: Non-Commercial](https://img.shields.io/badge/License-Non--Commercial-orange.svg)](LICENSE)
 
 **Язык:** [Русский](README.md) · [English](README.en.md)

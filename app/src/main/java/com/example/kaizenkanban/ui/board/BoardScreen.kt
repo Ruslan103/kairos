@@ -7875,41 +7875,63 @@ internal fun Modifier.hubGroupPlate(@Suppress("UNUSED_PARAMETER") dark: Boolean)
     }
 }
 
-/** Champagne gleam for group action icons. */
-internal fun Modifier.hubGroupGoldFill(): Modifier = this
-    .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
-    .drawWithContent {
-        drawContent()
-        drawRect(
-            brush = Brush.horizontalGradient(
-                HubGroupGleam,
-                startX = 0f,
-                endX = size.width
-            ),
-            blendMode = BlendMode.SrcIn
-        )
-    }
+/** White paper only. Slate and dark keep the champagne gleam. */
+@Composable
+private fun hubIconsOnWhitePaper(): Boolean =
+    LocalAppThemeMode.current != AppThemeMode.SLATE &&
+        MaterialTheme.colorScheme.surface.luminance() >= 0.5f
 
-/** Diagonal gleam so a thin + or × crosses more than one gold. */
-internal fun Modifier.hubGroupMarkGoldFill(): Modifier = this
-    .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
-    .drawWithContent {
-        drawContent()
-        drawRect(
-            brush = Brush.linearGradient(
-                listOf(
-                    Color(0xFF8A4010),
-                    Color(0xFFF0C14A),
-                    Color(0xFFFFF6C8),
-                    Color(0xFFF6D15A),
-                    Color(0xFFC37C22)
-                ),
-                start = Offset.Zero,
-                end = Offset(size.width, size.height)
-            ),
-            blendMode = BlendMode.SrcIn
-        )
-    }
+/** Champagne gleam for action icons. White paper uses the group-frame graphite. */
+@Composable
+internal fun Modifier.hubGroupGoldFill(): Modifier {
+    val onWhite = hubIconsOnWhitePaper()
+    return this
+        .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+        .drawWithContent {
+            drawContent()
+            drawRect(
+                brush = if (onWhite) {
+                    SolidColor(HubGroupCapLight)
+                } else {
+                    Brush.horizontalGradient(
+                        HubGroupGleam,
+                        startX = 0f,
+                        endX = size.width
+                    )
+                },
+                blendMode = BlendMode.SrcIn
+            )
+        }
+}
+
+/** Diagonal gleam so a thin + or × crosses more than one gold. White paper is flat graphite. */
+@Composable
+internal fun Modifier.hubGroupMarkGoldFill(): Modifier {
+    val onWhite = hubIconsOnWhitePaper()
+    return this
+        .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+        .drawWithContent {
+            drawContent()
+            drawRect(
+                brush = if (onWhite) {
+                    SolidColor(HubGroupCapLight)
+                } else {
+                    Brush.linearGradient(
+                        listOf(
+                            Color(0xFF8A4010),
+                            Color(0xFFF0C14A),
+                            Color(0xFFFFF6C8),
+                            Color(0xFFF6D15A),
+                            Color(0xFFC37C22)
+                        ),
+                        start = Offset.Zero,
+                        end = Offset(size.width, size.height)
+                    )
+                },
+                blendMode = BlendMode.SrcIn
+            )
+        }
+}
 
 private val HubGroupPlateIconSlot = 48.dp
 private val HubGroupPlateActionsWidth = HubGroupPlateIconSlot * 4
